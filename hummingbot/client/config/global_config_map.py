@@ -268,15 +268,14 @@ main_config_map = {
                   default="5000"),
     "heartbeat_enabled":
         ConfigVar(key="heartbeat_enabled",
-                  prompt="Do you want to enable aggregated order and trade data collection? >>> ",
+                  prompt="Do you want to report aggregated, anonymized trade volume by exchange to Hummingbot Foundation? >>> ",
                   required_if=lambda: False,
                   type_str="bool",
                   validator=validate_bool,
                   default=True),
     "heartbeat_interval_min":
         ConfigVar(key="heartbeat_interval_min",
-                  prompt="How often do you want Hummingbot to send aggregated order and trade data (in minutes, "
-                         "e.g. enter 5 for once every 5 minutes)? >>> ",
+                  prompt="How often do you want to send the heartbeat (Enter 5 for 5 minutes)? >>> ",
                   required_if=lambda: False,
                   type_str="decimal",
                   validator=lambda v: validate_decimal(v, Decimal(0), inclusive=False),
