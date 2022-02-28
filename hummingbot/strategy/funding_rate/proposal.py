@@ -50,7 +50,7 @@ class Proposal:
         if side1.is_buy == side2.is_buy:
             raise Exception("Proposals cannot be on the same side.")
         self.buy_side, self.sell_side = (side1, side2) if side1.is_buy else (side2, side1)
-        self.order_amount: Decimal = order_amount  # TODO auto-determine based on limit order
+        self.order_amount: Decimal = order_amount  # TODO auto-determine based on market order orderbook, so take it as construction parameter
 
     def profit_pct(self) -> Decimal:
         """
@@ -62,4 +62,4 @@ class Proposal:
         return (sell_price - buy_price) / buy_price
 
     def __repr__(self):
-        return f"Buy Side: {self.buy_side}\nSell Side: {self.sell_side}\nOrder amount: {self.order_amount}\n"
+        return f"Buy Side: {self.buy_side}\nSell Side: {self.sell_side}\nOrder amount: {self.order_amount}\nPrice: {self.sell_side.order_price}\n"
