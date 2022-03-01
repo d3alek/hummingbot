@@ -18,6 +18,9 @@ from hummingbot.core.event.events import (
     PositionAction,
     PositionMode,
     SellOrderCompletedEvent,
+    OrderFilledEvent,
+    # BuyOrderEventCreated,
+    # SellOrderEventCreated,
     TradeType
 )
 from hummingbot.core.utils.async_utils import safe_ensure_future, safe_gather
@@ -33,11 +36,11 @@ spa_logger = None
 
 class StrategyState(Enum):
     Closed = 0
-    OpeningBuyLimit = 1
-    OpeningSellMarket = 2
+    Opening1Limit = 1
+    Opening2Market = 2
     Opened = 3
-    ClosingBuyLimit = 4
-    ClosingSellMarket = 5
+    Closing1Limit = 4
+    Closing2Market = 5
 
 
 class FundingRateStrategy(StrategyPyBase):
@@ -64,6 +67,7 @@ class FundingRateStrategy(StrategyPyBase):
                     min_closing_funding_rate_pct: Decimal,
                     perp_market_slippage_buffer: Decimal = Decimal("0"),
                     next_opening_delay: float = 120,
+                    next_closing_delay: float = 120,
                     status_report_interval: float = 10):
         """
         :param spot_market_info: The spot market info
@@ -86,7 +90,9 @@ class FundingRateStrategy(StrategyPyBase):
         self._perp_leverage = perp_leverage
         self._perp_market_slippage_buffer = perp_market_slippage_buffer
         self._next_opening_delay = next_opening_delay
+        self._next_closing_delay = next_closing_delay
         self._next_opening_ts = 0  # next arbitrage opening timestamp
+        self._next_closing_ts = 0  # next arbitrage closing timestamp
         self._all_markets_ready = False
         self._ev_loop = asyncio.get_event_loop()
         self._last_timestamp = 0
@@ -102,6 +108,8 @@ class FundingRateStrategy(StrategyPyBase):
         self._last_arb_op_reported_ts = 0
         perp_market1_info.market.set_leverage(perp_market1_info.trading_pair, self._perp_leverage)
         perp_market2_info.market.set_leverage(perp_market2_info.trading_pair, self._perp_leverage)
+
+        self.market1_order_type = OrderType.MARKET
 
     @property
     def strategy_state(self) -> StrategyState:
@@ -194,39 +202,80 @@ class FundingRateStrategy(StrategyPyBase):
         The main procedure for the arbitrage strategy.
         """
         self.update_strategy_state()
-        if self._strategy_state in (StrategyState.OpeningBuyLimit, StrategyState.OpeningSellMarket, StrategyState.ClosingBuyLimit, StrategyState.ClosingSellMarket):
+        if self._strategy_state in (StrategyState.Opening2Market, StrategyState.Closing2Market):
+            return
+        if self._strategy_state in (StrategyState.Opening1Limit, StrategyState.Closing1Limit):
+            # TODO what if funding rates no longer are good for us?
+            await self.keep_limit_order_up_to_date()
+            return
+        if self.strategy_state == StrategyState.Opened and self._next_closing_ts > self.current_timestamp:
             return
         if self.strategy_state == StrategyState.Closed and self._next_opening_ts > self.current_timestamp:
             return
         proposals = await self.create_base_proposals()
-        # TODO just for the test not filtering proposals
-        # if self._strategy_state == StrategyState.Opened:
-        #     perp1_is_buy = False if self.perp1_positions[0].amount > 0 else True
-        #     proposals = [p for p in proposals if p.perp1_side.is_buy == perp1_is_buy and p.profit_pct() >=
-        #                  self._min_closing_funding_rate_pct]
-        # else:
-        #     proposals = [p for p in proposals if p.profit_pct() >= self._min_opening_funding_rate_pct]
+        if self._strategy_state == StrategyState.Opened:
+            perp1_is_buy = False if self.perp1_positions[0].amount > 0 else True
+            proposals = [p for p in proposals if p.perp1_side.is_buy == perp1_is_buy and p.profit_pct() >=
+                         self._min_closing_funding_rate_pct]
+        else:
+            proposals = [p for p in proposals if p.profit_pct() >= self._min_opening_funding_rate_pct]
         if len(proposals) == 0:
             return
         proposal = proposals[0]
         if self._last_arb_op_reported_ts + 60 < self.current_timestamp:
             pos_txt = "closing" if self._strategy_state == StrategyState.Opened else "opening"
-            self.logger().info(f"Arbitrage position {pos_txt} opportunity found.")
+            self.logger().info(f"Finding rate position {pos_txt} opportunity found.")
             self.logger().info(f"Profitability ({proposal.profit_pct():.2%}) is now above min_{pos_txt}_pct.")
             self._last_arb_op_reported_ts = self.current_timestamp
         self.apply_slippage_buffers(proposal)
         if self.check_budget_constraint(proposal):
             self.execute_proposal(proposal)
 
+    async def keep_limit_order_up_to_date(self):
+        market_info_to_active_orders = self.market_info_to_active_orders
+        limit_side = self.executing_proposal.maker_side
+        limit_orders = market_info_to_active_orders.get(limit_side.market_info, [])
+        market_side = self.executing_proposal.taker_side
+
+        if len(limit_orders) == 0:
+            self.logger().info("No limit order found to keep up to date")
+            return
+        elif len(limit_orders) > 1:
+            raise RuntimeError(f"More than 1 limit orders: {len(limit_orders)} found: {limit_orders}")
+
+        limit_order = limit_orders[0]
+
+        market_price = await market_side.market_info.market.get_order_price(
+            market_side.market_info.trading_pair, market_side.is_buy,
+            self.executing_proposal.order_amount)
+
+        if market_price != market_side.order_price:
+            self.logger().info(f"Market price {market_price:.2f} differs from proposal market price {market_side.order_price:.2f}, cancel limit order")
+            self.cancel_order(
+                market_trading_pair_tuple=limit_side.market_info,
+                order_id=limit_order.client_order_id)
+
+            if self._strategy_state == StrategyState.Opening1Limit:
+                self._strategy_state = StrategyState.Closed
+            elif self._strategy_state == StrategyState.Closing1Limit:
+                self._strategy_state = StrategyState.Opened
+            else:
+                raise RuntimeError(f"Unexpected state {self._strategy_state}")
+        else:
+            if self._last_arb_op_reported_ts + 5 < self.current_timestamp:
+                self.logger().info(f"Limit order {limit_order} is up to date. Waiting to fill.")
+                self._last_arb_op_reported_ts = self.current_timestamp
+
     def update_strategy_state(self):
         """
         Updates strategy state to either Opened or Closed if the condition is right.
         """
-        if self._strategy_state == StrategyState.OpeningSellMarket and len(self._completed_opening_order_ids) == 2 and \
+        if self._strategy_state == StrategyState.Opening2Market and len(self._completed_opening_order_ids) == 2 and \
                 self.perp1_positions and self.perp2_positions:
             self._strategy_state = StrategyState.Opened
             self._completed_opening_order_ids.clear()
-        elif self._strategy_state == StrategyState.ClosingSellMarket and len(self._completed_closing_order_ids) == 2 and \
+            self._next_closing_ts = self.current_timestamp + self._next_closing_delay
+        elif self._strategy_state == StrategyState.Closing2Market and len(self._completed_closing_order_ids) == 2 and \
                 len(self.perp1_positions) == 0 and len(self.perp2_positions) == 0:
             self._strategy_state = StrategyState.Closed
             self._completed_closing_order_ids.clear()
@@ -261,16 +310,35 @@ class FundingRateStrategy(StrategyPyBase):
         if not funding_info2:
             self.logger().error("Funding Info 2 is None")
             return []
+
+        market1_order_type = self.market1_order_type
+        if market1_order_type == OrderType.MARKET:
+            market2_order_type = OrderType.LIMIT
+            perp2_sell = perp1_buy
+            perp2_buy = perp1_sell
+        else:
+            market2_order_type = OrderType.MARKET
+            perp1_buy = perp2_sell
+            perp1_sell = perp2_buy
         return [
             Proposal(
-                ProposalSide(self._perp_market1_info, True, perp1_buy, funding_info1),
-                ProposalSide(self._perp_market2_info, False, perp2_sell, funding_info2),
+                ProposalSide(self._perp_market1_info, True, perp1_buy, funding_info1, market1_order_type),
+                ProposalSide(self._perp_market2_info, False, perp2_sell, funding_info2, market2_order_type),
                 self._order_amount),
-            Proposal(
-                ProposalSide(self._perp_market1_info, False, perp1_sell, funding_info1),
-                ProposalSide(self._perp_market2_info, True, perp2_buy, funding_info2),
-                self._order_amount)
+            # Proposal(
+            # ProposalSide(self._perp_market1_info, False, perp1_sell, funding_info1, market1_order_type),
+            # ProposalSide(self._perp_market2_info, True, perp2_buy, funding_info2, market2_order_type),
+            # self._order_amount)
         ]
+
+    def apply_slippage_buffer(self, order_price, is_buy, market_info):
+        s_buffer = self._perp_market_slippage_buffer
+        if not is_buy:
+            s_buffer *= Decimal("-1")
+        order_price *= Decimal("1") + s_buffer
+        order_price = market_info.market.quantize_order_price(market_info.trading_pair, order_price)
+
+        return order_price
 
     def apply_slippage_buffers(self, proposal: Proposal):
         """
@@ -279,15 +347,11 @@ class FundingRateStrategy(StrategyPyBase):
         for a sell order, the new order price is 99.
         :param proposal: the arbitrage proposal
         """
-        for arb_side in (proposal.buy_side):
-            market = arb_side.market_info.market
-            arb_side.amount = market.quantize_order_amount(arb_side.market_info.trading_pair, arb_side.amount)
-            s_buffer = self._perp_market_slippage_buffer
-            if not arb_side.is_buy:
-                s_buffer *= Decimal("-1")
-            arb_side.order_price *= Decimal("1") + s_buffer
-            arb_side.order_price = market.quantize_order_price(arb_side.market_info.trading_pair,
-                                                               arb_side.order_price)
+        for arb_side in [proposal.maker_side]:
+            arb_side.order_price = self.apply_slippage_buffer(
+                arb_side.order_price,
+                arb_side.is_buy,
+                arb_side.market_info)
 
     def check_budget_available(self) -> bool:
         """
@@ -340,7 +404,7 @@ class FundingRateStrategy(StrategyPyBase):
             order_candidate = PerpetualOrderCandidate(
                 trading_pair=market_info.trading_pair,
                 is_maker=False,
-                order_type=OrderType.LIMIT,
+                order_type=proposal_side.order_type,
                 order_side=TradeType.BUY if proposal_side.is_buy else TradeType.SELL,
                 amount=order_amount,
                 price=proposal_side.order_price,
@@ -366,17 +430,13 @@ class FundingRateStrategy(StrategyPyBase):
         """
         if proposal.order_amount == s_decimal_zero:
             return
-        if self._strategy_state in [StrategyState.Closed, StrategyState().Opened]:
-            execute_side = proposal.buy_side
-            type = execute_side.market_info.market.get_maker_order_type()
+        if self._strategy_state in [StrategyState.Closed, StrategyState.Opened]:
+            execute_side = proposal.maker_side
             position_action = PositionAction.CLOSE if self._strategy_state == StrategyState.Opened else PositionAction.OPEN
-            price = proposal.sell_side.order_price
 
-        elif self._strategy_state in [StrategyState.OpeningBuyLimit, StrategyState.ClosingBuyLimit]:
-            execute_side = proposal.sell_side
-            type = execute_side.market_info.market.get_taker_order_type()
-            position_action = PositionAction.CLOSE if self._strategy_state == StrategyState.ClosingBuyLimit else PositionAction.OPEN
-            price = execute_side.order_price
+        elif self._strategy_state in [StrategyState.Opening1Limit, StrategyState.Closing1Limit]:
+            execute_side = proposal.taker_side
+            position_action = PositionAction.CLOSE if self._strategy_state == StrategyState.Closing1Limit else PositionAction.OPEN
         else:
             raise RuntimeError("Unexpected state for execute_propsal:", self._strategy_state)
 
@@ -384,30 +444,29 @@ class FundingRateStrategy(StrategyPyBase):
         side = "BUY" if execute_side.is_buy else "SELL"
         self.log_with_clock(
             logging.INFO,
-            f"Placing {side} {type} {position_action} order for {proposal.order_amount} {execute_side.market_info.base_asset} "
-            f"at {execute_side.market_info.market.display_name} at {price} price"
+            f"Placing {side} {execute_side.order_type} {position_action} order for {proposal.order_amount} {execute_side.market_info.base_asset} "
+            f"at {execute_side.market_info.market.display_name} at {execute_side.order_price} price"
         )
         order_fn(
-            execute_side.market_info,
-            proposal.order_amount,
-            type,
-            price,
-            position_action=position_action
+            market_trading_pair_tuple=execute_side.market_info,
+            amount=proposal.order_amount,
+            order_type=execute_side.order_type,
+            price=execute_side.order_price,
         )
 
         if self._strategy_state == StrategyState.Opened:
-            self._strategy_state = StrategyState.ClosingBuyLimit
+            self._strategy_state = StrategyState.Closing1Limit
             self._completed_closing_order_ids.clear()
             # Now wait for limit order to fill to execute sell part of proposal
-        elif self._strategy_state == StrategyState.ClosingBuyLimit:
-            self._strategy_state = StrategyState.ClosingSellMarket
+        elif self._strategy_state == StrategyState.Closing1Limit:
+            self._strategy_state = StrategyState.Closing2Market
             # Now wait for market order to fill to finish the proposal
         elif self._strategy_state == StrategyState.Closed:
-            self._strategy_state = StrategyState.OpeningBuyLimit
+            self._strategy_state = StrategyState.Opening1Limit
             self._completed_opening_order_ids.clear()
             # Now wait for limit order to fill to execute sell part of proposal
-        elif self._strategy_state == StrategyState.OpeningBuyLimit:
-            self._strategy_state = StrategyState.OpeningSellMarket
+        elif self._strategy_state == StrategyState.Opening1Limit:
+            self._strategy_state = StrategyState.Opening2Market
             # Now wait for market order to fill to finish the proposal
         else:
             raise RuntimeError("Unexpected state for execute_propsal:", self._strategy_state)
@@ -513,16 +572,26 @@ class FundingRateStrategy(StrategyPyBase):
             self._main_task = None
         self._ready_to_start = False
 
+    def did_fill_order(self, event: OrderFilledEvent):
+        self.logger().info(f"Partially filled order {event.order_id}")
+
     def did_complete_buy_order(self, event: BuyOrderCompletedEvent):
         self.update_complete_order_id_lists(event.order_id)
-        if self._strategy_state in [StrategyState.OpeningBuyLimit, StrategyState.ClosingBuyLimit]:
+        if self._strategy_state in [StrategyState.Opening1Limit, StrategyState.Closing1Limit]:
+            # Execute second part of proposal
             self.execute_proposal(self.executing_proposal)
 
     def did_complete_sell_order(self, event: SellOrderCompletedEvent):
         self.update_complete_order_id_lists(event.order_id)
 
+    # def did_create_buy_order(self, event: BuyOrderEventCreated):
+    #     self.logger().info(f"Created {event.type} BUY order {event.order_id}")
+
+    # def did_create_sell_order(self, event: SellOrderEventCreated):
+    #     self.logger().info(f"Created {event.type} SELL order {event.order_id}")
+
     def update_complete_order_id_lists(self, order_id: str):
-        if self._strategy_state in [StrategyState.OpeningBuyLimit, StrategyState.OpeningSellMarket]:
+        if self._strategy_state in [StrategyState.Opening1Limit, StrategyState.Opening2Market]:
             self._completed_opening_order_ids.append(order_id)
-        elif self._strategy_state in [StrategyState.ClosingBuyLimit, StrategyState.ClosingSellMarket]:
+        elif self._strategy_state in [StrategyState.Closing1Limit, StrategyState.Closing2Market]:
             self._completed_closing_order_ids.append(order_id)

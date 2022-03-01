@@ -1,7 +1,6 @@
 from decimal import Decimal
 from hummingbot.strategy.market_trading_pair_tuple import MarketTradingPairTuple
-from hummingbot.core.event.events import FundingInfo
-
+from hummingbot.core.event.events import FundingInfo, OrderType
 s_decimal_nan = Decimal("NaN")
 s_decimal_0 = Decimal("0")
 
@@ -14,7 +13,8 @@ class ProposalSide:
                  market_info: MarketTradingPairTuple,
                  is_buy: bool,
                  order_price: Decimal,
-                 funding_info: FundingInfo
+                 funding_info: FundingInfo,
+                 order_type: OrderType
                  ):
         """
         :param market_info: The market where to submit the order
@@ -25,11 +25,12 @@ class ProposalSide:
         self.is_buy: bool = is_buy
         self.order_price: Decimal = order_price
         self.funding_info = funding_info
+        self.order_type = order_type
 
     def __repr__(self):
         side = "Buy" if self.is_buy else "Sell"
         base, quote = self.market_info.trading_pair.split("-")
-        return f"{self.market_info.market.display_name.capitalize()}: {side} {base}" \
+        return f"{self.market_info.market.display_name.capitalize()}: {self.order_type} {side} {base}" \
                f" at {self.order_price} {quote} Funding Rate ({self.funding_info.rate})."
 
 
@@ -63,3 +64,11 @@ class Proposal:
 
     def __repr__(self):
         return f"Buy Side: {self.buy_side}\nSell Side: {self.sell_side}\nOrder amount: {self.order_amount}\nPrice: {self.sell_side.order_price}\n"
+
+    @property
+    def maker_side(self):
+        return self.buy_side if self.buy_side.order_type == OrderType.LIMIT else self.sell_side
+
+    @property
+    def taker_side(self):
+        return self.buy_side if self.buy_side.order_type == OrderType.MARKET else self.sell_side

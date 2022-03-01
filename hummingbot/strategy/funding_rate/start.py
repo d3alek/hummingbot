@@ -14,6 +14,7 @@ def start(self):
     min_closing_funding_rate_pct = funding_rate_config_map.get("min_closing_funding_rate_pct").value / Decimal("100")
     perpetual_market_slippage_buffer = funding_rate_config_map.get("perpetual_market_slippage_buffer").value / Decimal("100")
     next_opening_delay = funding_rate_config_map.get("next_opening_delay").value
+    next_closing_delay = funding_rate_config_map.get("next_closing_delay").value
 
     self._initialize_markets([(perpetual_connector1, [perpetual_market]), (perpetual_connector2, [perpetual_market])])
     base, quote = perpetual_market.split("-")
@@ -30,4 +31,5 @@ def start(self):
                               min_opening_funding_rate_pct,
                               min_closing_funding_rate_pct,
                               perpetual_market_slippage_buffer,
-                              next_opening_delay)
+                              next_opening_delay,
+                              next_closing_delay)

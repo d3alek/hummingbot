@@ -108,4 +108,10 @@ funding_rate_config_map = {
         type_str="float",
         validator=lambda v: validate_decimal(v, min_value=0, inclusive=False),
         default=120),
+    "next_closing_delay": ConfigVar(
+        key="next_closing_delay",
+        prompt="How long do you want the strategy to wait before closing the position (in seconds)?",
+        type_str="float",
+        validator=lambda v: validate_decimal(v, min_value=0, inclusive=False),
+        default=120),
 }
