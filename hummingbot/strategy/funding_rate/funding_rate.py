@@ -215,6 +215,7 @@ class FundingRateStrategy(StrategyPyBase):
         proposals = await self.create_base_proposals()
         if self._strategy_state == StrategyState.Opened:
             perp1_is_buy = False if self.perp1_positions[0].amount > 0 else True
+            # TODO p.perp1_side
             proposals = [p for p in proposals if p.perp1_side.is_buy == perp1_is_buy and p.profit_pct() >=
                          self._min_closing_funding_rate_pct]
         else:
@@ -249,8 +250,10 @@ class FundingRateStrategy(StrategyPyBase):
             market_side.market_info.trading_pair, market_side.is_buy,
             self.executing_proposal.order_amount)
 
-        if market_price != market_side.order_price:
-            self.logger().info(f"Market price {market_price:.2f} differs from proposal market price {market_side.order_price:.2f}, cancel limit order")
+        diff = (market_price - market_side.order_price) / market_side.order_price
+        diff_percent = 100 * diff
+        if abs(diff_percent) > 0.02:
+            self.logger().info(f"Market price {market_price:.5f} differs from proposal market price {market_side.order_price:.5f} by {diff_percent:.2f}, cancel limit order")
             self.cancel_order(
                 market_trading_pair_tuple=limit_side.market_info,
                 order_id=limit_order.client_order_id)
@@ -263,7 +266,7 @@ class FundingRateStrategy(StrategyPyBase):
                 raise RuntimeError(f"Unexpected state {self._strategy_state}")
         else:
             if self._last_arb_op_reported_ts + 5 < self.current_timestamp:
-                self.logger().info(f"Limit order {limit_order} is up to date. Waiting to fill.")
+                self.logger().info(f"Limit order {limit_order} is up to date: diff percent {diff_percent:.2f}. Waiting to fill.")
                 self._last_arb_op_reported_ts = self.current_timestamp
 
     def update_strategy_state(self):
@@ -333,11 +336,14 @@ class FundingRateStrategy(StrategyPyBase):
 
     def apply_slippage_buffer(self, order_price, is_buy, market_info):
         s_buffer = self._perp_market_slippage_buffer
+        old_price = order_price
         if not is_buy:
             s_buffer *= Decimal("-1")
         order_price *= Decimal("1") + s_buffer
         order_price = market_info.market.quantize_order_price(market_info.trading_pair, order_price)
 
+        buy_or_sell = 'BUY' if is_buy else 'SELL'
+        self.logger().info(f"{market_info.market.display_name.capitalize()}:Applied slippage {self._perp_market_slippage_buffer} to {buy_or_sell} price {old_price}: {order_price}")
         return order_price
 
     def apply_slippage_buffers(self, proposal: Proposal):
@@ -393,7 +399,7 @@ class FundingRateStrategy(StrategyPyBase):
 
             position_close = False
             perp_positions = self.perp_positions(market_info)
-            if perp_positions and abs(perp_positions.amount) == order_amount:
+            if perp_positions and abs(perp_positions[0].amount) == order_amount:
                 cur_perp_pos_is_buy = True if perp_positions[0].amount > 0 else False
                 if proposal_side.is_buy != cur_perp_pos_is_buy:
                     position_close = True
@@ -583,6 +589,9 @@ class FundingRateStrategy(StrategyPyBase):
 
     def did_complete_sell_order(self, event: SellOrderCompletedEvent):
         self.update_complete_order_id_lists(event.order_id)
+        if self._strategy_state in [StrategyState.Opening1Limit, StrategyState.Closing1Limit]:
+            # Execute second part of proposal
+            self.execute_proposal(self.executing_proposal)
 
     # def did_create_buy_order(self, event: BuyOrderEventCreated):
     #     self.logger().info(f"Created {event.type} BUY order {event.order_id}")
