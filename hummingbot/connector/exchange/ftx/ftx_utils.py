@@ -17,7 +17,12 @@ DEFAULT_FEES = [0.02, 0.07]
 
 def split_trading_pair(trading_pair: str) -> Optional[Tuple[str, str]]:
     try:
-        m = trading_pair.split("/")
+        if trading_pair.endswith("-PERP"):
+            trading_pair = trading_pair.replace("-PERP", "-USDT")
+        if "/" in trading_pair:
+            m = trading_pair.split("/")
+        else:
+            m = trading_pair.split("-")
         return m[0], m[1]
     # Exceptions are now logged as warnings in trading pair fetcher
     except Exception:
@@ -33,6 +38,8 @@ def convert_from_exchange_trading_pair(exchange_trading_pair: str) -> Optional[s
 
 
 def convert_to_exchange_trading_pair(hb_trading_pair: str) -> str:
+    if hb_trading_pair.endswith("-USDT"):
+        return hb_trading_pair.replace("-USDT", "-PERP")
     return hb_trading_pair.replace("-", "/")
 
 

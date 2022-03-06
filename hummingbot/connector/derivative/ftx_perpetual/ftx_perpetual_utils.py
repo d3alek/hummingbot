@@ -17,7 +17,8 @@ DEFAULT_FEES = [0.02, 0.07]
 
 def split_trading_pair(trading_pair: str) -> Optional[Tuple[str, str]]:
     try:
-        m = trading_pair.split("/")
+        trading_pair = trading_pair.replace("-PERP", "-USDT")
+        m = trading_pair.split("-")
         return m[0], m[1]
     # Exceptions are now logged as warnings in trading pair fetcher
     except Exception:
@@ -25,15 +26,18 @@ def split_trading_pair(trading_pair: str) -> Optional[Tuple[str, str]]:
 
 
 def convert_from_exchange_trading_pair(exchange_trading_pair: str) -> Optional[str]:
-    if split_trading_pair(exchange_trading_pair) is None:
+    split = split_trading_pair(exchange_trading_pair)
+    if split is None:
         return None
     # Blocktane does not split BASEQUOTE (fthusd)
-    base_asset, quote_asset = split_trading_pair(exchange_trading_pair)
+    base_asset, quote_asset = split
     return f"{base_asset}-{quote_asset}".upper()
 
 
 def convert_to_exchange_trading_pair(hb_trading_pair: str) -> str:
-    return hb_trading_pair.replace("-", "/")
+    if hb_trading_pair.endswith("-USDT"):
+        return hb_trading_pair.replace("-USDT", "-PERP")
+    raise RuntimeError(f"Unsupported trading pair {hb_trading_pair}")
 
 
 KEYS = {

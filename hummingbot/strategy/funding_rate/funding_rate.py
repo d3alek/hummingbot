@@ -219,7 +219,8 @@ class FundingRateStrategy(StrategyPyBase):
             proposals = [p for p in proposals if p.perp1_side.is_buy == perp1_is_buy and p.profit_pct() >=
                          self._min_closing_funding_rate_pct]
         else:
-            proposals = [p for p in proposals if p.profit_pct() >= self._min_opening_funding_rate_pct]
+            # proposals = [p for p in proposals if p.profit_pct() >= self._min_opening_funding_rate_pct]
+            pass
         if len(proposals) == 0:
             return
         proposal = proposals[0]

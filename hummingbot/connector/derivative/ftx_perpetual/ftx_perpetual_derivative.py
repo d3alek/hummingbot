@@ -32,6 +32,7 @@ from hummingbot.core.data_type.limit_order import LimitOrder
 from hummingbot.core.data_type.order_book import OrderBook
 from hummingbot.core.data_type.trade_fee import AddedToCostTradeFee, TokenAmount
 from hummingbot.core.event.events import (
+    FundingInfo,
     BuyOrderCompletedEvent,
     BuyOrderCreatedEvent,
     MarketEvent,
@@ -112,8 +113,9 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
         self._trading_rules_polling_task = None
         self._tx_tracker = FtxPerpetualDerivativeTransactionTracker(self)
         self._user_stream_event_listener_task = None
-        self._user_stream_tracker = FtxUserStreamTracker(ftx_auth=self._ftx_auth,
-                                                         trading_pairs=trading_pairs)
+        self._user_stream_tracker = FtxUserStreamTracker(
+            ftx_auth=self._ftx_auth,
+            trading_pairs=trading_pairs)
         self._user_stream_tracker_task = None
         self._check_network_interval = 60.0
         self._trading_pairs = trading_pairs
@@ -173,17 +175,14 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
     #     self._tx_tracker.c_start(clock, timestamp)
 
     def tick(self, timestamp: float):
-        now = time.time()
-        poll_interval = (self.SHORT_POLL_INTERVAL
-                         if now - self._user_stream_tracker.last_recv_time > 60.0
-                         else self.LONG_POLL_INTERVAL)
+        poll_interval = self._poll_interval
         last_tick = int(self._last_timestamp / poll_interval)
         current_tick = int(timestamp / poll_interval)
         if current_tick > last_tick:
             if not self._poll_notifier.is_set():
                 self._poll_notifier.set()
 
-        self.tx_tracker.c_tick(timestamp)
+        self._tx_tracker.tick(timestamp)
         self._last_timestamp = timestamp
 
     async def _update_inflight_order(self, tracked_order: FtxInFlightOrder, event: Dict[str, Any]):
@@ -194,7 +193,7 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
             base, quote = self.split_trading_pair(tracked_order.trading_pair)
             if market_event == MarketEvent.OrderCancelled:
                 self.logger().info(f"Successfully cancelled order {tracked_order.client_order_id}")
-                self.c_stop_tracking_order(tracked_order.client_order_id)
+                self.stop_tracking_order(tracked_order.client_order_id)
                 self.trigger_event(self.MARKET_ORDER_CANCELLED_EVENT_TAG,
                                    OrderCancelledEvent(self.current_timestamp,
                                                        tracked_order.client_order_id))
@@ -249,7 +248,7 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
                                 tracked_order.order_type))
             # Complete the order if relevant
             if tracked_order.is_done:
-                self.c_stop_tracking_order(tracked_order.client_order_id)
+                self.stop_tracking_order(tracked_order.client_order_id)
 
     async def _update_balances(self):
         local_asset_names = set(self._account_balances.keys())
@@ -310,7 +309,7 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
 
             market_list = await self._api_request("GET", path_url=market_path_url)
 
-            result_list = {market["name"]: market for market in market_list["result"] if market["type"] == "spot"}
+            result_list = {market["name"]: market for market in market_list["result"] if market["type"] == "future"}
 
             trading_rules_list = self._format_trading_rules(result_list)
             self._trading_rules.clear()
@@ -352,7 +351,7 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
                                                     tracked_order.client_order_id,
                                                     tracked_order.order_type)
                         )
-                        self.c_stop_tracking_order(tracked_order.client_order_id)
+                        self.stop_tracking_order(tracked_order.client_order_id)
                         self.logger().warning(
                             f"Order {tracked_order.client_order_id} not found on exchange after "
                             f"{UNRECOGNIZED_ORDER_DEBOUCE} seconds. Marking as failed"
@@ -519,7 +518,7 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
 
     def quantize_order_amount(self, trading_pair: str, amount, price=0.0):
         trading_rule: TradingRule = self._trading_rules[trading_pair]
-        quantized_amount = ExchangeBase.c_quantize_order_amount(self, trading_pair, amount)
+        quantized_amount = ExchangeBase.quantize_order_amount(self, trading_pair, amount)
 
         global s_decimal_0
         if quantized_amount < trading_rule.min_order_size:
@@ -580,8 +579,8 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
                           price: Optional[Decimal] = s_decimal_0):
         trading_rule: TradingRule = self._trading_rules[trading_pair]
 
-        decimal_amount = self.c_quantize_order_amount(trading_pair, amount)
-        decimal_price = (self.c_quantize_order_price(trading_pair, price)
+        decimal_amount = self.quantize_order_amount(trading_pair, amount)
+        decimal_price = (self.quantize_order_price(trading_pair, price)
                          if order_type.is_limit_type()
                          else s_decimal_0)
 
@@ -591,7 +590,7 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
 
         try:
             order_result = None
-            self.c_start_tracking_order(
+            self.start_tracking_order(
                 order_id,
                 None,
                 trading_pair,
@@ -664,7 +663,7 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
         except Exception:
             tracked_order = self._in_flight_orders.get(order_id)
             tracked_order.set_status("FAILURE")
-            self.c_stop_tracking_order(order_id)
+            self.stop_tracking_order(order_id)
             self.logger().error(
                 f"Error submitting buy {order_type} order to ftx for "
                 f"{decimal_amount} {trading_pair} "
@@ -698,8 +697,8 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
                            price: Optional[Decimal] = NaN):
         trading_rule: TradingRule = self._trading_rules[trading_pair]
 
-        decimal_amount = self.c_quantize_order_amount(trading_pair, amount)
-        decimal_price = (self.c_quantize_order_price(trading_pair, price)
+        decimal_amount = self.quantize_order_amount(trading_pair, amount)
+        decimal_price = (self.quantize_order_price(trading_pair, price)
                          if order_type.is_limit_type()
                          else s_decimal_0)
 
@@ -710,7 +709,7 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
         try:
             order_result = None
 
-            self.c_start_tracking_order(
+            self.start_tracking_order(
                 order_id,
                 None,
                 trading_pair,
@@ -783,7 +782,7 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
         except Exception:
             tracked_order = self._in_flight_orders.get(order_id)
             tracked_order.set_status("FAILURE")
-            self.c_stop_tracking_order(order_id)
+            self.stop_tracking_order(order_id)
             self.logger().error(
                 f"Error submitting sell {order_type} order to ftx for "
                 f"{decimal_amount} {trading_pair} "
@@ -799,7 +798,7 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
              amount,
              order_type=OrderType.MARKET,
              price=0.0,
-             kwargs={}) -> str:
+             **kwargs) -> str:
         tracking_nonce = get_tracking_nonce()
         order_id: str = str(f"FTX-sell-{trading_pair}-{tracking_nonce}")
 
@@ -937,6 +936,19 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
         is_maker = order_type is OrderType.LIMIT_MAKER
         return estimate_fee("ftx", is_maker)
 
+    def get_funding_info(self, trading_pair: str) -> Optional[FundingInfo]:
+        """
+        Retrieves the Funding Info for the specified trading pair.
+        Note: This function should NOT be called when the connector is not yet ready.
+        :param: trading_pair: The specified trading pair.
+        """
+        if trading_pair in self._order_book_tracker.data_source.funding_info:
+            return self._order_book_tracker.data_source.funding_info[trading_pair]
+        else:
+            self.logger().error(f"Funding Info for {trading_pair} not found. Proceeding to fetch using REST API.")
+            safe_ensure_future(self._order_book_tracker.data_source.get_funding_info(trading_pair))
+            return None
+
 
 class FtxPerpetualDerivativeTransactionTracker(TransactionTracker):
     def __init__(self, owner):
@@ -944,5 +956,5 @@ class FtxPerpetualDerivativeTransactionTracker(TransactionTracker):
         self._owner = owner
 
     def did_timeout_tx(self, tx_id: str):
-        TransactionTracker.c_did_timeout_tx(self, tx_id)
+        TransactionTracker.did_timeout_tx(self, tx_id)
         self._owner.did_timeout_tx(tx_id)
