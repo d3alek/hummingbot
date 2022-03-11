@@ -178,6 +178,7 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
         poll_interval = self._poll_interval
         last_tick = int(self._last_timestamp / poll_interval)
         current_tick = int(timestamp / poll_interval)
+
         if current_tick > last_tick:
             if not self._poll_notifier.is_set():
                 self._poll_notifier.set()
@@ -279,6 +280,8 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
         retval = []
 
         for market in market_dict.values():
+            if market.get("name") in ['TRUMP2024', 'BOLSONARO2022']:
+                continue
             try:
                 trading_pair = convert_from_exchange_trading_pair(market.get("name"))
                 min_trade_size = Decimal(market.get("minProvideSize"))
@@ -948,6 +951,50 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
             self.logger().error(f"Funding Info for {trading_pair} not found. Proceeding to fetch using REST API.")
             safe_ensure_future(self._order_book_tracker.data_source.get_funding_info(trading_pair))
             return None
+
+    # def set_position_mode(self, position_mode: PositionMode):
+    #     safe_ensure_future(self._set_position_mode(position_mode))
+
+    # async def _set_position_mode(self, position_mode: PositionMode):
+    #     initial_mode = await self._get_position_mode()
+    #     if initial_mode != position_mode:
+    #         params = {
+    #             "dualSidePosition": position_mode.value
+    #         }
+    #         response = await self.__api_request(
+    #             method=RESTMethod.POST,
+    #             path=CONSTANTS.CHANGE_POSITION_MODE_URL,
+    #             data=params,
+    #             add_timestamp=True,
+    #             is_auth_required=True,
+    #             limit_id=CONSTANTS.POST_POSITION_MODE_LIMIT_ID,
+    #             return_err=True
+    #         )
+    #         if response["msg"] == "success" and response["code"] == 200:
+    #             self.logger().info(f"Using {position_mode.name} position mode.")
+    #             self._position_mode = position_mode
+    #         else:
+    #             self.logger().error(f"Unable to set postion mode to {position_mode.name}.")
+    #             self.logger().info(f"Using {initial_mode.name} position mode.")
+    #             self._position_mode = initial_mode
+    #     else:
+    #         self.logger().info(f"Using {position_mode.name} position mode.")
+    #         self._position_mode = position_mode
+
+    # async def _get_position_mode(self) -> Optional[PositionMode]:
+    #     # To-do: ensure there's no active order or contract before changing position mode
+    #     if self._position_mode is None:
+    #         response = await self.__api_request(
+    #             method=RESTMethod.GET,
+    #             path=CONSTANTS.CHANGE_POSITION_MODE_URL,
+    #             add_timestamp=True,
+    #             is_auth_required=True,
+    #             limit_id=CONSTANTS.GET_POSITION_MODE_LIMIT_ID,
+    #             return_err=True
+    #         )
+    #         self._position_mode = PositionMode.HEDGE if response["dualSidePosition"] else PositionMode.ONEWAY
+
+    #     return self._position_mode
 
 
 class FtxPerpetualDerivativeTransactionTracker(TransactionTracker):

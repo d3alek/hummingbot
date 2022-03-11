@@ -71,13 +71,13 @@ KEYS = {
     "huobi_api_key":
         ConfigVar(key="huobi_api_key",
                   prompt="Enter your Huobi API key >>> ",
-                  required_if=using_exchange("huobi"),
+                  required_if=using_exchange("huobi_perpetual"),
                   is_secure=True,
                   is_connect_key=True),
     "huobi_secret_key":
         ConfigVar(key="huobi_secret_key",
                   prompt="Enter your Huobi secret key >>> ",
-                  required_if=using_exchange("huobi"),
+                  required_if=using_exchange("huobi_perpetual"),
                   is_secure=True,
                   is_connect_key=True),
 }

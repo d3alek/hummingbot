@@ -21,6 +21,7 @@ from hummingbot.core.event.events import (
     OrderFilledEvent,
     # BuyOrderEventCreated,
     # SellOrderEventCreated,
+    OrderCancelledEvent,
     TradeType
 )
 from hummingbot.core.utils.async_utils import safe_ensure_future, safe_gather
@@ -106,8 +107,8 @@ class FundingRateStrategy(StrategyPyBase):
         self._strategy_state = StrategyState.Closed
         self._ready_to_start = False
         self._last_arb_op_reported_ts = 0
-        perp_market1_info.market.set_leverage(perp_market1_info.trading_pair, self._perp_leverage)
-        perp_market2_info.market.set_leverage(perp_market2_info.trading_pair, self._perp_leverage)
+        # perp_market1_info.market.set_leverage(perp_market1_info.trading_pair, self._perp_leverage)
+        # perp_market2_info.market.set_leverage(perp_market2_info.trading_pair, self._perp_leverage)
 
         self.market1_order_type = OrderType.MARKET
 
@@ -157,42 +158,51 @@ class FundingRateStrategy(StrategyPyBase):
             if not self._all_markets_ready:
                 return
             else:
-                self.logger().info("Markets are ready.")
-                self.logger().info("Trading started.")
+                try:
+                    self.logger().info("Markets are ready.")
+                    self.logger().info("Trading started.")
 
-                if not self.check_budget_available():
-                    self.logger().info("Trading not possible.")
-                    return
-
-                for perp_market_info, perp_positions in [(self._perp_market1_info, self.perp1_positions),
-                                                         (self._perp_market2_info, self.perp2_positions)]:
-                    if perp_market_info.market.position_mode != PositionMode.ONEWAY or \
-                            len(perp_positions) > 1:
-                        self.logger().info(
-                            f"This strategy supports only Oneway position mode. Please update your position in {perp_market_info}"
-                            "mode before starting this strategy.")
+                    if not self.check_budget_available():
+                        self.logger().info("Trading not possible.")
                         return
 
-                    self._ready_to_start = True
-
-                    if len(perp_positions) == 1:
-                        adj_perp_amount = perp_market_info.market.quantize_order_amount(
-                            perp_market_info.trading_pair, self._order_amount)
-                        if abs(perp_positions[0].amount) == adj_perp_amount:
+                    for perp_market_info, perp_positions in [(self._perp_market1_info, self.perp1_positions),
+                                                             (self._perp_market2_info, self.perp2_positions)]:
+                        self.logger().info(perp_market_info.market.name)
+                        if perp_market_info.market.name == 'huobi_perpetual':
+                            perp_market_info.market.set_trading_pair_position_mode(
+                                perp_market_info.trading_pair,
+                                PositionMode.ONEWAY)
+                        elif perp_market_info.market.position_mode != PositionMode.ONEWAY or \
+                                len(perp_positions) > 1:
                             self.logger().info(
-                                f"There is an existing {perp_market_info.trading_pair} "
-                                f"{perp_positions[0].position_side.name} position. The bot resumes "
-                                f"operation to close out the arbitrage position")
-                            self._strategy_state = StrategyState.Opened
-                            # TODO check it also exists in perp2_positions
-                        else:
-                            self.logger().info(
-                                f"There is an existing {perp_market_info.trading_pair} "
-                                f"{perp_positions[0].position_side.name} position with unmatched "
-                                f"position amount. Please manually close out the position before starting "
-                                f"this strategy.")
-                            self._ready_to_start = False
+                                f"This strategy supports only Oneway position mode. Please update your position in {perp_market_info}"
+                                "mode before starting this strategy.")
                             return
+
+                        self._ready_to_start = True
+
+                        if len(perp_positions) == 1:
+                            adj_perp_amount = perp_market_info.market.quantize_order_amount(
+                                perp_market_info.trading_pair, self._order_amount)
+                            if abs(perp_positions[0].amount) == adj_perp_amount:
+                                self.logger().info(
+                                    f"There is an existing {perp_market_info.trading_pair} "
+                                    f"{perp_positions[0].position_side.name} position. The bot resumes "
+                                    f"operation to close out the arbitrage position")
+                                self._strategy_state = StrategyState.Opened
+                                # TODO check it also exists in perp2_positions
+                            else:
+                                self.logger().info(
+                                    f"There is an existing {perp_market_info.trading_pair} "
+                                    f"{perp_positions[0].position_side.name} position with unmatched "
+                                    f"position amount. Please manually close out the position before starting "
+                                    f"this strategy.")
+                                self._ready_to_start = False
+                                return
+                except Exception:
+                    self._all_markets_ready = False
+                    raise
 
         if self._ready_to_start and (self._main_task is None or self._main_task.done()):
             self._main_task = safe_ensure_future(self.main(timestamp))
@@ -253,18 +263,11 @@ class FundingRateStrategy(StrategyPyBase):
 
         diff = (market_price - market_side.order_price) / market_side.order_price
         diff_percent = 100 * diff
-        if abs(diff_percent) > 0.02:
+        if abs(diff_percent) > 0.05:
             self.logger().info(f"Market price {market_price:.5f} differs from proposal market price {market_side.order_price:.5f} by {diff_percent:.2f}, cancel limit order")
             self.cancel_order(
                 market_trading_pair_tuple=limit_side.market_info,
                 order_id=limit_order.client_order_id)
-
-            if self._strategy_state == StrategyState.Opening1Limit:
-                self._strategy_state = StrategyState.Closed
-            elif self._strategy_state == StrategyState.Closing1Limit:
-                self._strategy_state = StrategyState.Opened
-            else:
-                raise RuntimeError(f"Unexpected state {self._strategy_state}")
         else:
             if self._last_arb_op_reported_ts + 5 < self.current_timestamp:
                 self.logger().info(f"Limit order {limit_order} is up to date: diff percent {diff_percent:.2f}. Waiting to fill.")
@@ -459,6 +462,7 @@ class FundingRateStrategy(StrategyPyBase):
             amount=proposal.order_amount,
             order_type=execute_side.order_type,
             price=execute_side.order_price,
+            position_action=position_action,
         )
 
         if self._strategy_state == StrategyState.Opened:
@@ -505,6 +509,7 @@ class FundingRateStrategy(StrategyPyBase):
         """
         columns = ["Exchange", "Market", "Sell Price", "Buy Price", "Mid Price"]
         data = []
+        not_ready = {}
         for market_info in [self._perp_market1_info, self._perp_market2_info]:
             market, trading_pair, base_asset, quote_asset = market_info
             buy_price = await market.get_quote_price(trading_pair, True, self._order_amount)
@@ -517,6 +522,8 @@ class FundingRateStrategy(StrategyPyBase):
                 float(buy_price),
                 float(mid_price)
             ])
+            if not market.ready:
+                not_ready.update(market.status_dict)
         markets_df = pd.DataFrame(data=data, columns=columns)
         lines = []
         lines.extend(["", "  Markets:"] + ["    " + line for line in markets_df.to_string(index=False).split("\n")])
@@ -543,6 +550,8 @@ class FundingRateStrategy(StrategyPyBase):
         if len(warning_lines) > 0:
             lines.extend(["", "*** WARNINGS ***"] + warning_lines)
 
+        if not_ready:
+            lines.append(f"{not_ready}")
         return "\n".join(lines)
 
     def short_proposal_msg(self, arb_proposal: List[Proposal], indented: bool = True) -> List[str]:
@@ -594,6 +603,13 @@ class FundingRateStrategy(StrategyPyBase):
             # Execute second part of proposal
             self.execute_proposal(self.executing_proposal)
 
+    def did_cancel_order(self, event: OrderCancelledEvent):
+        if self._strategy_state == StrategyState.Opening1Limit:
+            self._strategy_state = StrategyState.Closed
+        elif self._strategy_state == StrategyState.Closing1Limit:
+            self._strategy_state = StrategyState.Opened
+        else:
+            self.logger().warn(f"Unexpected state {self._strategy_state} when order got canceled. Ignore if this is cleaning of standing orders at start/end")
     # def did_create_buy_order(self, event: BuyOrderEventCreated):
     #     self.logger().info(f"Created {event.type} BUY order {event.order_id}")
 

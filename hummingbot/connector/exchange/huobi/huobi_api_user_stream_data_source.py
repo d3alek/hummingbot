@@ -52,27 +52,24 @@ class HuobiAPIUserStreamDataSource(UserStreamTrackerDataSource):
         try:
             signed_params = self._auth.add_auth_to_params(
                 method="get",
-                path_url="/ws/v2",
+                path_url="/linear-swap-notification",
                 is_ws=True,
             )
             auth_request: WSRequest = WSRequest(
                 {
-                    "action": "req",
-                    "ch": "auth",
-                    "params": {
-                        "authType": "api",
-                        "accessKey": signed_params["accessKey"],
-                        "signatureMethod": signed_params["signatureMethod"],
-                        "signatureVersion": signed_params["signatureVersion"],
-                        "timestamp": signed_params["timestamp"],
-                        "signature": signed_params["signature"],
-                    },
+                    "op": "auth",
+                    "type": "api",
+                    "AccessKeyId": signed_params["AccessKeyId"],
+                    "SignatureMethod": signed_params["SignatureMethod"],
+                    "SignatureVersion": signed_params["SignatureVersion"],
+                    "Timestamp": signed_params["Timestamp"],
+                    "Signature": signed_params["Signature"],
                 }
             )
             await self._ws_assistant.send(auth_request)
             resp: WSResponse = await self._ws_assistant.receive()
             auth_response = resp.data
-            if auth_response.get("code", 0) != 200:
+            if auth_response.get("err-code", -1) != 0:
                 raise ValueError(f"User Stream Authentication Fail! {auth_response}")
             self.logger().info("Successfully authenticated to user stream...")
         except asyncio.CancelledError:
@@ -81,14 +78,16 @@ class HuobiAPIUserStreamDataSource(UserStreamTrackerDataSource):
             self.logger().error(f"Error occurred authenticating websocket connection... Error: {str(e)}", exc_info=True)
             raise
 
-    async def _subscribe_topic(self, topic: str):
+    async def _subscribe_topic(self, topic: str, output: asyncio.Queue):
         try:
-            subscribe_request: WSRequest = WSRequest({"action": "sub", "ch": topic})
+            subscribe_request: WSRequest = WSRequest({"op": "sub", "topic": topic})
             await self._ws_assistant.send(subscribe_request)
             resp: WSResponse = await self._ws_assistant.receive()
             sub_response = resp.data
-            if sub_response.get("code", 0) != 200:
-                raise ValueError(f"Error subscribing to topic: {topic}")
+            if sub_response.get('op') == 'notify':
+                output.put_nowait(sub_response)
+            elif sub_response.get("err-code", -1) != 0:
+                raise ValueError(f"Error subscribing to topic: {topic}. {sub_response}")
             self.logger().info(f"Successfully subscribed to {topic}")
         except asyncio.CancelledError:
             raise
@@ -96,11 +95,10 @@ class HuobiAPIUserStreamDataSource(UserStreamTrackerDataSource):
             self.logger().error(f"Cannot subscribe to user stream topic: {topic}")
             raise
 
-    async def _subscribe_channels(self):
+    async def _subscribe_channels(self, output: asyncio.Queue):
         try:
-            await self._subscribe_topic(CONSTANTS.HUOBI_TRADE_DETAILS_TOPIC)
-            await self._subscribe_topic(CONSTANTS.HUOBI_ORDER_UPDATE_TOPIC)
-            await self._subscribe_topic(CONSTANTS.HUOBI_ACCOUNT_UPDATE_TOPIC)
+            await self._subscribe_topic(CONSTANTS.HUOBI_ORDER_UPDATE_TOPIC, output)
+            await self._subscribe_topic(CONSTANTS.HUOBI_ACCOUNT_UPDATE_TOPIC, output)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -116,12 +114,12 @@ class HuobiAPIUserStreamDataSource(UserStreamTrackerDataSource):
                 await self._ws_assistant.connect(ws_url=CONSTANTS.WS_PRIVATE_URL, ping_timeout=self.HEARTBEAT_INTERVAL)
 
                 await self._authenticate_client()
-                await self._subscribe_channels()
+                await self._subscribe_channels(output)
 
                 async for ws_response in self._ws_assistant.iter_messages():
                     data = ws_response.data
-                    if data["action"] == "ping":
-                        pong_request = WSRequest(payload={"action": "pong", "data": data["data"]})
+                    if data["op"] == "ping":
+                        pong_request = WSRequest(payload={"op": "pong", "ts": data["ts"]})
                         await self._ws_assistant.send(request=pong_request)
                         continue
                     output.put_nowait(data)

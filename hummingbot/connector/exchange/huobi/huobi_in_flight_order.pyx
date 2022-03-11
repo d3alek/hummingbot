@@ -10,7 +10,6 @@ from hummingbot.core.event.events import (
     TradeType
 )
 
-
 cdef class HuobiInFlightOrder(InFlightOrderBase):
     def __init__(self,
                  client_order_id: str,
@@ -21,7 +20,7 @@ cdef class HuobiInFlightOrder(InFlightOrderBase):
                  price: Decimal,
                  amount: Decimal,
                  creation_timestamp: float,
-                 initial_state: str = "submitted"):
+                 initial_state: OrderStatus = OrderStatus.Submitted):
         super().__init__(
             client_order_id,
             exchange_order_id,
@@ -31,26 +30,30 @@ cdef class HuobiInFlightOrder(InFlightOrderBase):
             price,
             amount,
             creation_timestamp,
-            initial_state,  # submitted, partial-filled, cancelling, filled, canceled, partial-canceled
+            str(initial_state.value), # serializing enum
         )
 
         self.trade_id_set = set()
 
     @property
+    def last_state_enum(self) -> OrderStatus:
+        return OrderStatus(int(self.last_state))
+
+    @property
     def is_done(self) -> bool:
-        return self.last_state in {"filled", "canceled", "partial-canceled"}
+        return self.last_state_enum in {OrderStatus.Filled, OrderStatus.Canceled, OrderStatus.PartialFilledCanceled}
 
     @property
     def is_cancelled(self) -> bool:
-        return self.last_state in {"partial-canceled", "canceled"}
+        return self.last_state_enum in {OrderStatus.PartialFilledCanceled, OrderStatus.Canceled}
 
     @property
     def is_failure(self) -> bool:
-        return self.last_state in {"canceled"}
+        return self.last_state_enum in {OrderStatus.Canceled}
 
     @property
     def is_open(self) -> bool:
-        return self.last_state in {"submitted", "partial-filled"}
+        return self.last_state_enum in {OrderStatus.Submitted, OrderStatus.ParialFilled}
 
     @classmethod
     def from_json(cls, data: Dict[str, Any]) -> InFlightOrderBase:
@@ -64,21 +67,18 @@ cdef class HuobiInFlightOrder(InFlightOrderBase):
         :param trade_update: the event message received for the order fill (or trade event)
         :return: True if the order gets updated otherwise False
         """
-        trade_id = trade_update["tradeId"]
-        if str(trade_update["orderId"]) != self.exchange_order_id or trade_id in self.trade_id_set:
+        trade_id = trade_update["trade_id"]
+        if trade_id in self.trade_id_set:
             return False
         self.trade_id_set.add(trade_id)
-        trade_amount = Decimal(str(trade_update["tradeVolume"]))
-        trade_price = Decimal(str(trade_update["tradePrice"]))
+        trade_amount = Decimal(str(trade_update["trade_volume"]))
+        trade_price = Decimal(str(trade_update["trade_price"]))
         quote_amount = trade_amount * trade_price
 
         self.executed_amount_base += trade_amount
         self.executed_amount_quote += quote_amount
-        self.fee_paid += Decimal(str(trade_update["transactFee"]))
-        self.fee_asset = trade_update["feeCurrency"].upper()
-
-        if self.is_open:
-            self.last_state = trade_update["orderStatus"]
+        self.fee_paid += Decimal(str(trade_update["trade_fee"]))
+        self.fee_asset = trade_update["fee_asset"].upper()
 
         self.check_filled_condition()
 
