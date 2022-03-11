@@ -726,7 +726,7 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
         path_url = CONSTANTS.PLACE_ORDER_URL
         side = "buy" if is_buy else "sell"
         # source: https://github.com/hbdmapi/huobi_futures_Python/blob/master/alpha/platforms/huobi_usdt_swap_cross_trade.py#L306
-        order_type_str = "limit" if order_type is OrderType.LIMIT else "optimal_20" if OrderType().MARKET else "post_only"
+        order_type_str = "limit" if order_type is OrderType.LIMIT else "optimal_20" if OrderType.MARKET else "post_only"
         # TODO see https://huobiapi.github.io/docs/usdt_swap/v1/en/#isolated-place-an-order for other options like IOC (immediate or cancel)
         params = {
             "price": f"{price:f}",
@@ -755,12 +755,13 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
                           price: Optional[Decimal] = s_decimal_0):
         trading_rule: TradingRule = self._trading_rules[trading_pair]
 
+        decimal_amount = self.quantize_order_amount(trading_pair, amount)  # not needed for Maker but set them anyway
+        decimal_price = self.quantize_order_price(trading_pair, price)
         if order_type is OrderType.LIMIT or order_type is OrderType.LIMIT_MAKER:
-            decimal_amount = self.quantize_order_amount(trading_pair, amount)
-            decimal_price = self.quantize_order_price(trading_pair, price)
             if decimal_amount < trading_rule.min_order_size:
                 raise ValueError(f"Buy order amount {decimal_amount} is lower than the minimum order size "
                                  f"{trading_rule.min_order_size}.")
+
         try:
             exchange_order_id = await self.place_order(order_id, trading_pair, decimal_amount, True, order_type, decimal_price)
             self.start_tracking_order(

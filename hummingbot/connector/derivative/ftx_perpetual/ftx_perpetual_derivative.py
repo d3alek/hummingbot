@@ -686,7 +686,7 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
             amount,
             order_type=OrderType.LIMIT,
             price=NaN,
-            kwargs={}) -> str:
+            **kwargs) -> str:
         tracking_nonce = get_tracking_nonce()
         order_id: str = str(f"FTX-buy-{trading_pair}-{tracking_nonce}")
         safe_ensure_future(self.execute_buy(order_id, trading_pair, amount, order_type, price))
