@@ -10,6 +10,8 @@ from hummingbot.core.event.events import (
     TradeType
 )
 
+from hummingbot.connector.exchange.huobi.huobi_utils import OrderStatus
+
 cdef class HuobiInFlightOrder(InFlightOrderBase):
     def __init__(self,
                  client_order_id: str,
