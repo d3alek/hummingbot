@@ -1,6 +1,7 @@
 ## Access
 https://718473507363.signin.aws.amazon.com/console
 https://lightsail.aws.amazon.com/ls/remote/eu-central-1/instances/Para/terminal?protocol=ssh#
+https://unix.stackexchange.com/a/163878
 
 ## Install
 
