@@ -33,6 +33,7 @@ from hummingbot.core.data_type.limit_order import LimitOrder
 from hummingbot.core.data_type.order_book import OrderBook
 from hummingbot.core.data_type.trade_fee import AddedToCostTradeFee, TokenAmount
 from hummingbot.core.event.events import (
+    PositionAction,
     PositionSide,
     FundingInfo,
     BuyOrderCompletedEvent,
@@ -574,7 +575,8 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
                           amount: Decimal,
                           is_buy: bool,
                           order_type: OrderType,
-                          price: Optional[Decimal]) -> Dict[str, Any]:
+                          price: Optional[Decimal],
+                          position_action: PositionAction) -> Dict[str, Any]:
 
         path_url = "/orders"
 
@@ -586,10 +588,10 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
                 "price": price,
                 "size": amount,
                 "type": "limit",
-                "reduceOnly": False,
                 "ioc": False,
                 "postOnly": order_type is OrderType.LIMIT_MAKER,
                 "clientId": str(order_id),
+                "reduceOnly": True if position_action == PositionAction.CLOSE else False
             }
         elif order_type is OrderType.MARKET:
             body = {
@@ -598,10 +600,10 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
                 "price": None,
                 "type": "market",
                 "size": amount,
-                "reduceOnly": False,
                 "ioc": False,
                 "postOnly": False,
                 "clientId": str(order_id),
+                "reduceOnly": True if position_action == PositionAction.CLOSE else False
             }
         else:
             raise ValueError(f"Unknown order_type for FTX: {order_type}")
@@ -722,10 +724,11 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
             amount,
             order_type=OrderType.LIMIT,
             price=NaN,
+            position_action=None,
             **kwargs) -> str:
         tracking_nonce = get_tracking_nonce()
         order_id: str = str(f"FTX-buy-{trading_pair}-{tracking_nonce}")
-        safe_ensure_future(self.execute_buy(order_id, trading_pair, amount, order_type, price))
+        safe_ensure_future(self.execute_buy(order_id, trading_pair, amount, order_type, price, position_action))
         return order_id
 
     async def execute_sell(self,
@@ -733,7 +736,8 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
                            trading_pair: str,
                            amount: Decimal,
                            order_type: OrderType = OrderType.LIMIT,
-                           price: Optional[Decimal] = NaN):
+                           price: Optional[Decimal] = NaN,
+                           position_action: PositionAction = None):
         trading_rule: TradingRule = self._trading_rules[trading_pair]
 
         decimal_amount = self.quantize_order_amount(trading_pair, amount)
@@ -837,11 +841,12 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
              amount,
              order_type=OrderType.MARKET,
              price=0.0,
+             position_action=None,
              **kwargs) -> str:
         tracking_nonce = get_tracking_nonce()
         order_id: str = str(f"FTX-sell-{trading_pair}-{tracking_nonce}")
 
-        safe_ensure_future(self.execute_sell(order_id, trading_pair, amount, order_type, price))
+        safe_ensure_future(self.execute_sell(order_id, trading_pair, amount, order_type, price, position_action))
         return order_id
 
     async def execute_cancel(self, trading_pair: str, order_id: str):

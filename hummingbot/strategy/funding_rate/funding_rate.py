@@ -20,10 +20,11 @@ from hummingbot.core.event.events import (
     PositionMode,
     SellOrderCompletedEvent,
     OrderFilledEvent,
-    # BuyOrderEventCreated,
-    # SellOrderEventCreated,
+    BuyOrderCreatedEvent,
+    SellOrderCreatedEvent,
     OrderCancelledEvent,
     TradeType,
+    LimitOrderStatus
 )
 from hummingbot.core.utils.async_utils import safe_ensure_future, safe_gather
 from hummingbot.logger import HummingbotLogger
@@ -173,13 +174,13 @@ class FundingRateStrategy(StrategyPyBase):
                                         "Bot is configured to OPEN position but an open position with the required amount"
                                         f" {adj_amount} already exists "
                                     )
-                                elif self._position_action == PositionAction.CLOSE and position.position_side == side:
+                                elif self._position_action == PositionAction.CLOSE and position.position_side != side:
                                     self.logger().info(
                                         "Bot is configured to CLOSE position but the open position with the required amount"
                                         f" {adj_amount} is not {side}"
                                     )
                                 else:
-                                    self.strategy_state == StrategyState.OPEN
+                                    self.strategy_state == StrategyState.POSITIONS_MATCH
                                     self._ready_to_start = True
                             else:
                                 unmatched_positions.append(position)
@@ -243,8 +244,10 @@ class FundingRateStrategy(StrategyPyBase):
         taker_side = self.executing_proposal.taker_side
 
         if len(maker_orders) == 0:
-            limit_orders = maker_side.market_info.market.limit_orders
-            self.logger().info(limit_orders)
+            limit_orders = list(filter(
+                lambda l: l.status == LimitOrderStatus.OPEN,
+                maker_side.market_info.market.limit_orders
+            ))
             if len(limit_orders) == 0:
                 self.logger().info("No maker order found to keep up to date")
                 return
@@ -310,10 +313,18 @@ class FundingRateStrategy(StrategyPyBase):
             else:
                 self._strategy_state = StrategyState.POSITIONS_MATCH
 
-        elif self._strategy_state == StrategyState.CLOSING_TAKER and len(self._completed_closing_order_ids) == 2 and \
-                len(self.short_positions) == 0 and len(self.long_positions) == 0:
-            self._strategy_state = StrategyState.POSITIONS_MATCH
+        elif self._strategy_state == StrategyState.CLOSING_TAKER and len(self._completed_closing_order_ids) == 2:
+            if not self.positions_match():
+                self.logger().warning(f"Positions don't match\nSHORT: {self.short_positions}\nLONG:{self.long_positions}")
+                return
             self._completed_closing_order_ids.clear()
+
+            # Only checking short position as we already know they match
+            if len(self.short_positions) == 0 and len(self.long_positions) == 0:
+                self.logger().info("Closed all positions. Done")
+                self._strategy_state = StrategyState.CLOSED_ALL
+            else:
+                self._strategy_state = StrategyState.POSITIONS_MATCH
 
     async def create_base_proposal(self) -> List[Proposal]:
         tasks = [
@@ -337,12 +348,17 @@ class FundingRateStrategy(StrategyPyBase):
         long_is_buy = not short_is_buy
         short_price, long_price = (short_buy, long_sell) if short_is_buy else (short_sell, long_buy)
         if self._short_order_type == OrderType.LIMIT_MAKER:
-            price = long_price
+            # We can choose to replace short price to be closer to long price (taker price)
+            fn = min if short_is_buy else max
+            short_price = fn(short_price, long_price)
         else:
-            price = short_price
+            # We can choose to replace long price to be closer to short price (taker price)
+            fn = min if long_is_buy else max
+            long_price = fn(short_price, long_price)
+
         proposal = Proposal(
-            ProposalSide(self._short_info, short_is_buy, price, self._short_order_type),
-            ProposalSide(self._long_info, long_is_buy, price, self._long_order_type),
+            ProposalSide(self._short_info, short_is_buy, short_price, self._short_order_type),
+            ProposalSide(self._long_info, long_is_buy, long_price, self._long_order_type),
             self._chunk_size)
         self.logger().info(f"Make proposal {proposal} because short price is {short_price}, long price is {long_price}")
         return proposal
@@ -473,7 +489,6 @@ class FundingRateStrategy(StrategyPyBase):
             price=execute_side.order_price,
             position_action=position_action,
         )
-
         self._strategy_state = next_state
         if next_state == StrategyState.CLOSING_MAKER:
             self._completed_closing_order_ids.clear()
@@ -494,7 +509,7 @@ class FundingRateStrategy(StrategyPyBase):
             data.append([
                 pos.trading_pair,
                 "LONG" if pos.amount > 0 else "SHORT",
-                pos.entry_price,
+                round(pos.entry_price, 6),
                 pos.amount,
                 pos.leverage,
                 pos.unrealized_pnl
@@ -541,7 +556,7 @@ class FundingRateStrategy(StrategyPyBase):
         # See if there're any active positions.
         if len(self.short_positions) > 0 or len(self.long_positions) > 0:
             df = self.active_positions_df()
-            lines.extend(["", "  Positions1:"] + ["    " + line for line in df.to_string(index=False).split("\n")])
+            lines.extend(["", "  Positions:"] + ["    " + line for line in df.to_string(index=False).split("\n")])
         else:
             lines.extend(["", "  No active positions."])
 
@@ -562,6 +577,8 @@ class FundingRateStrategy(StrategyPyBase):
 
         if not_ready:
             lines.append(f"{not_ready}")
+
+        lines.append(f"Strategy State: {self.strategy_state}")
         return "\n".join(lines)
 
     def short_proposal_msg(self, proposal: Proposal, indented: bool = True) -> List[str]:
@@ -620,11 +637,14 @@ class FundingRateStrategy(StrategyPyBase):
             self._strategy_state = StrategyState.POSITIONS_MATCH
         else:
             self.logger().warn(f"Unexpected state {self._strategy_state} when order got canceled. Ignore if this is cleaning of standing orders at start/end")
-    # def did_create_buy_order(self, event: BuyOrderEventCreated):
-    #     self.logger().info(f"Created {event.type} BUY order {event.order_id}")
 
-    # def did_create_sell_order(self, event: SellOrderEventCreated):
-    #     self.logger().info(f"Created {event.type} SELL order {event.order_id}")
+    def did_create_buy_order(self, event: BuyOrderCreatedEvent):
+        self.logger().info(f"Created {event.type} BUY order {event.order_id}")
+        self.wait_to_cancel = event.order_id
+
+    def did_create_sell_order(self, event: SellOrderCreatedEvent):
+        self.logger().info(f"Created {event.type} SELL order {event.order_id}")
+        self.wait_to_cancel = event.order_id
 
     def update_complete_order_id_lists(self, order_id: str):
         if self._strategy_state in [StrategyState.OPENING_MAKER, StrategyState.OPENING_TAKER]:

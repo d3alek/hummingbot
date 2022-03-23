@@ -88,7 +88,7 @@ funding_rate_config_map = {
         type_str="decimal",
         prompt_on_new=True),
     "action_open": ConfigVar(
-        key="action",
+        key="action_open",
         prompt="If True, OPEN positions, if False, CLOSE",
         validator=lambda v: validate_bool(v),
         type_str="bool",

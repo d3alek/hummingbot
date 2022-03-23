@@ -33,6 +33,7 @@ from hummingbot.core.data_type.order_book import OrderBook
 from hummingbot.core.data_type.trade_fee import AddedToCostTradeFee, TokenAmount
 from hummingbot.core.data_type.transaction_tracker import TransactionTracker
 from hummingbot.core.event.events import (
+    PositionAction,
     PositionSide,
     FundingInfo,
     BuyOrderCompletedEvent,
@@ -754,7 +755,8 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
                           amount: Decimal,
                           is_buy: bool,
                           order_type: OrderType,
-                          price: Decimal) -> str:
+                          price: Decimal,
+                          position_action: PositionAction) -> str:
         path_url = CONSTANTS.PLACE_ORDER_URL
         side = "buy" if is_buy else "sell"
         # source: https://github.com/hbdmapi/huobi_futures_Python/blob/master/alpha/platforms/huobi_usdt_swap_cross_trade.py#L306
@@ -767,7 +769,8 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
             "contract_code": convert_to_exchange_trading_pair(trading_pair),
             "direction": side,
             "lever_rate": self._leverage.get(trading_pair, 20),
-            "order_price_type": order_type_str
+            "order_price_type": order_type_str,
+            "reduce_only": 1 if position_action == PositionAction.CLOSE else 0
         }
         self.logger().info(f"Place Order params {params}")
         exchange_order_id = await self._api_request(
@@ -784,7 +787,8 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
                           trading_pair: str,
                           amount: Decimal,
                           order_type: OrderType,
-                          price: Optional[Decimal] = s_decimal_0):
+                          price: Optional[Decimal] = s_decimal_0,
+                          position_action: PositionAction = None):
         trading_rule: TradingRule = self._trading_rules[trading_pair]
 
         decimal_amount = self.quantize_order_amount(trading_pair, amount)  # not needed for Maker but set them anyway
@@ -795,7 +799,7 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
                                  f"{trading_rule.min_order_size}.")
 
         try:
-            exchange_order_id = await self.place_order(order_id, trading_pair, decimal_amount, True, order_type, decimal_price)
+            exchange_order_id = await self.place_order(order_id, trading_pair, decimal_amount, True, order_type, decimal_price, position_action)
             self.start_tracking_order(
                 client_order_id=order_id,
                 exchange_order_id=exchange_order_id,
@@ -836,10 +840,10 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
                 MarketOrderFailureEvent(self.current_timestamp, order_id, order_type))
 
     def buy(self, trading_pair: str, amount: Decimal, order_type=OrderType.MARKET,
-            price: Decimal = s_decimal_NaN, **kwargs) -> str:
+            price: Decimal = s_decimal_NaN, position_action=None, **kwargs) -> str:
         order_id: str = get_new_client_order_id(TradeType.BUY, trading_pair)
 
-        safe_ensure_future(self.execute_buy(order_id, trading_pair, amount, order_type, price))
+        safe_ensure_future(self.execute_buy(order_id, trading_pair, amount, order_type, price, position_action))
         return order_id
 
     async def execute_sell(self,
@@ -847,7 +851,8 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
                            trading_pair: str,
                            amount: Decimal,
                            order_type: OrderType,
-                           price: Optional[Decimal] = s_decimal_0):
+                           price: Optional[Decimal] = s_decimal_0,
+                           position_action: PositionAction = None):
         trading_rule: TradingRule = self._trading_rules[trading_pair]
 
         decimal_amount = self.quantize_order_amount(trading_pair, amount)
@@ -858,7 +863,7 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
                              f"{trading_rule.min_order_size}.")
 
         try:
-            exchange_order_id = await self.place_order(order_id, trading_pair, decimal_amount, False, order_type, decimal_price)
+            exchange_order_id = await self.place_order(order_id, trading_pair, decimal_amount, False, order_type, decimal_price, position_action)
             self.start_tracking_order(
                 client_order_id=order_id,
                 exchange_order_id=exchange_order_id,
@@ -899,9 +904,9 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
                 MarketOrderFailureEvent(self.current_timestamp, order_id, order_type))
 
     def sell(self, trading_pair: str, amount: Decimal, order_type=OrderType.MARKET,
-             price: Decimal = s_decimal_NaN, **kwargs) -> str:
+             price: Decimal = s_decimal_NaN, position_action=None, **kwargs) -> str:
         order_id = get_new_client_order_id(TradeType.SELL, trading_pair)
-        safe_ensure_future(self.execute_sell(order_id, trading_pair, amount, order_type, price))
+        safe_ensure_future(self.execute_sell(order_id, trading_pair, amount, order_type, price, position_action))
         return order_id
 
     async def execute_cancel(self, trading_pair: str, order_id: str):
