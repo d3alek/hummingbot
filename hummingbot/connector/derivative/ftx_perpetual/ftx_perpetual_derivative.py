@@ -649,7 +649,8 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
                                                           decimal_amount,
                                                           True,
                                                           order_type,
-                                                          decimal_price)
+                                                          decimal_price,
+                                                          position_action)
                 except asyncio.TimeoutError:
                     # We timed out while placing this order. We may have successfully submitted the order, or we may have had connection
                     # issues that prevented the submission from taking place. We'll assume that the order is live and let our order status
@@ -663,7 +664,8 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
                                                           decimal_amount,
                                                           True,
                                                           order_type,
-                                                          None)
+                                                          None,
+                                                          position_action)
                 except asyncio.TimeoutError:
                     # We timed out while placing this order. We may have successfully submitted the order, or we may have had connection
                     # issues that prevented the submission from taking place. We'll assume that the order is live and let our order status
@@ -771,7 +773,8 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
                                                           decimal_amount,
                                                           False,
                                                           order_type,
-                                                          decimal_price)
+                                                          decimal_price,
+                                                          position_action)
                 except asyncio.TimeoutError:
                     # We timed out while placing this order. We may have successfully submitted the order, or we may have had connection
                     # issues that prevented the submission from taking place. We'll assume that the order is live and let our order status
@@ -785,7 +788,8 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
                                                           decimal_amount,
                                                           False,
                                                           order_type,
-                                                          None)
+                                                          None,
+                                                          position_action)
                 except asyncio.TimeoutError:
                     # We timed out while placing this order. We may have successfully submitted the order, or we may have had connection
                     # issues that prevented the submission from taking place. We'll assume that the order is live and let our order status
