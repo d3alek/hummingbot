@@ -23,6 +23,10 @@ cdef class HuobiInFlightOrder(InFlightOrderBase):
                  amount: Decimal,
                  creation_timestamp: float,
                  initial_state: OrderStatus = OrderStatus.Submitted):
+        try:
+            str_state = str(initial_state.value)
+        except AttributeError:
+            str_state = initial_state
         super().__init__(
             client_order_id,
             exchange_order_id,
@@ -32,7 +36,7 @@ cdef class HuobiInFlightOrder(InFlightOrderBase):
             price,
             amount,
             creation_timestamp,
-            str(initial_state.value), # serializing enum
+            str_state, # serializing enum
         )
 
         self.trade_id_set = set()

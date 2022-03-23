@@ -5,31 +5,31 @@ from hummingbot.strategy.funding_rate.funding_rate_config_map import funding_rat
 
 
 def start(self):
-    perpetual_connector1 = funding_rate_config_map.get("perpetual_connector1").value.lower()
-    perpetual_connector2 = funding_rate_config_map.get("perpetual_connector2").value.lower()
-    perpetual_market = funding_rate_config_map.get("perpetual_market").value
-    order_amount = funding_rate_config_map.get("order_amount").value
-    perpetual_leverage = funding_rate_config_map.get("perpetual_leverage").value
-    min_opening_funding_rate_pct = funding_rate_config_map.get("min_opening_funding_rate_pct").value / Decimal("100")
-    min_closing_funding_rate_pct = funding_rate_config_map.get("min_closing_funding_rate_pct").value / Decimal("100")
-    perpetual_market_slippage_buffer = funding_rate_config_map.get("perpetual_market_slippage_buffer").value / Decimal("100")
-    next_opening_delay = funding_rate_config_map.get("next_opening_delay").value
-    next_closing_delay = funding_rate_config_map.get("next_closing_delay").value
+    short = funding_rate_config_map.get("short").value.lower()
+    long = funding_rate_config_map.get("long").value.lower()
+    short_maker = funding_rate_config_map.get("short_maker").value
+    trading_pair = funding_rate_config_map.get("trading_pair").value
 
-    self._initialize_markets([(perpetual_connector1, [perpetual_market]), (perpetual_connector2, [perpetual_market])])
-    base, quote = perpetual_market.split("-")
+    total_amount = funding_rate_config_map.get("total_amount").value
+    chunk_size = funding_rate_config_map.get("chunk_size").value
+    action_open = funding_rate_config_map.get("action_open").value
 
-    perpetual_market1_info = MarketTradingPairTuple(self.markets[perpetual_connector1], perpetual_market, base, quote)
-    perpetual_market2_info = MarketTradingPairTuple(self.markets[perpetual_connector2], perpetual_market, base, quote)
+    maker_slip = funding_rate_config_map.get("maker_slip").value / Decimal("100")
+    taker_delta = funding_rate_config_map.get("taker_delta").value / Decimal("100")
 
-    self.market_trading_pair_tuples = [perpetual_market1_info, perpetual_market2_info]
+    self._initialize_markets([(short, [trading_pair]), (long, [trading_pair])])
+    base, quote = trading_pair.split("-")
+
+    short_info = MarketTradingPairTuple(self.markets[short], trading_pair, base, quote)
+    long_info = MarketTradingPairTuple(self.markets[long], trading_pair, base, quote)
+
+    self.market_trading_pair_tuples = [short_info, long_info]
     self.strategy = FundingRateStrategy()
-    self.strategy.init_params(perpetual_market1_info,
-                              perpetual_market2_info,
-                              order_amount,
-                              perpetual_leverage,
-                              min_opening_funding_rate_pct,
-                              min_closing_funding_rate_pct,
-                              perpetual_market_slippage_buffer,
-                              next_opening_delay,
-                              next_closing_delay)
+    self.strategy.init_params(short_info=short_info,
+                              long_info=long_info,
+                              short_maker=short_maker,
+                              total_amount=total_amount,
+                              chunk_size=chunk_size,
+                              action_open=action_open,
+                              maker_slip=maker_slip,
+                              taker_delta=taker_delta)

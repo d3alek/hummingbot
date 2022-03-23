@@ -8,27 +8,15 @@ strategy: null
 # The following configuations are only required for the AMM arbitrage trading strategy
 
 # Connectors and markets parameters
-perpetual_connector1: null
-perpetual_connector2: null
-perpetual_market: null
+short: null
+long: null
+short_maker: null
+trading_pair: null
 
-# Order amount to submit orders on both spot and perpetual markets
-order_amount: null
+total_amount: null
+chunk_size: null
+action_open: True
 
-perpetual_leverage: null
+maker_slip: null
 
-# Minimum profit percentage required before opening an arbitrage position, expressed in percentage value, e.g. 1 = 1%
-# The profitability is calculated from the gap between sell and buy price, it does not account for fees and slippages
-min_opening_funding_rate_pct: null
-
-# Minimum profit percentage required before closing the arbitrage position, expressed in percentage value, e.g. 1 = 1%
-min_closing_funding_rate_pct: null
-
-# A buffer to add to the price to account for slippage when buying/selling on second connector market
-# (Enter 1 for 1%)
-perpetual_market_slippage_buffer: null
-
-# cool off period between arbitrage cycles
-next_opening_delay: null
-
-next_closing_delay: null
+taker_delta: null

@@ -99,6 +99,7 @@ class HuobiAPIUserStreamDataSource(UserStreamTrackerDataSource):
         try:
             await self._subscribe_topic(CONSTANTS.HUOBI_ORDER_UPDATE_TOPIC, output)
             await self._subscribe_topic(CONSTANTS.HUOBI_ACCOUNT_UPDATE_TOPIC, output)
+            await self._subscribe_topic(CONSTANTS.HUOBI_POSITION_UPDATE_TOPIC, output)
         except asyncio.CancelledError:
             raise
         except Exception:

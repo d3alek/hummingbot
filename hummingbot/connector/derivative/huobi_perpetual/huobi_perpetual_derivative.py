@@ -12,6 +12,7 @@ from typing import (
 
 import ujson
 
+from hummingbot.connector.derivative.position import Position
 import hummingbot.connector.exchange.huobi.huobi_constants as CONSTANTS
 from hummingbot.connector.exchange.huobi.huobi_auth import HuobiAuth
 from hummingbot.connector.exchange.huobi.huobi_in_flight_order import HuobiInFlightOrder
@@ -32,6 +33,7 @@ from hummingbot.core.data_type.order_book import OrderBook
 from hummingbot.core.data_type.trade_fee import AddedToCostTradeFee, TokenAmount
 from hummingbot.core.data_type.transaction_tracker import TransactionTracker
 from hummingbot.core.event.events import (
+    PositionSide,
     FundingInfo,
     BuyOrderCompletedEvent,
     BuyOrderCreatedEvent,
@@ -125,6 +127,8 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
 
         ExchangeBase.__init__(self)
         PerpetualTrading.__init__(self)
+
+        self._positions_initialized = False
 
     @property
     def name(self) -> str:
@@ -303,15 +307,39 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
 
         self.logger().info("update balances done")
 
-    # async def _update_account_id(self) -> str:
-    #     accounts = await self._api_request("get", path_url=CONSTANTS.ACCOUNT_ID_URL, is_auth_required=True)
-    #     self.logger().info(f"accounts {accounts}")
-    #     try:
-    #         for account in accounts:
-    #             if account["state"] == "working" and account["type"] == "spot":
-    #                 self._account_id = str(account["id"])
-    #     except Exception as e:
-    #         raise ValueError(f"Unable to retrieve account id: {e}")
+    async def _update_positions(self, positions = None):
+        if positions is None:
+            params = {"margin_account": "USDT"}
+            data = await self._api_request(
+                "post",
+                path_url=CONSTANTS.POSITION_INFO,
+                is_auth_required=True,
+                data=params,
+            )
+            positions = data['positions']
+
+        for position in positions:
+            trading_pair = position.get("contract_code")
+            position_side = PositionSide.LONG if position.get("direction") == 'buy' else PositionSide.SHORT
+            unrealized_pnl = Decimal(position.get("profit_unreal"))
+            entry_price = Decimal(position.get("cost_open"))
+            amount = Decimal(position.get("volume"))
+            leverage = Decimal(position.get("lever_rate"))
+            pos_key = self.position_key(trading_pair, position_side)
+            if amount != 0:
+                self._account_positions[pos_key] = Position(
+                    trading_pair=trading_pair,
+                    position_side=position_side,
+                    unrealized_pnl=unrealized_pnl,
+                    entry_price=entry_price,
+                    amount=amount,
+                    leverage=leverage
+                )
+            else:
+                if pos_key in self._account_positions:
+                    del self._account_positions[pos_key]
+
+        self._positions_initialized = True
 
     def get_fee(self,
                 base_currency: str,
@@ -551,6 +579,7 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
                 await safe_gather(
                     self._update_balances(),
                     self._update_order_status(),
+                    self._update_positions(),
                 )
                 self._last_poll_timestamp = self.current_timestamp
             except asyncio.CancelledError:
@@ -590,7 +619,7 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
 
     async def _user_stream_event_listener(self):
         async for stream_message in self._iter_user_stream_queue():
-            self.logger().info(f"Stream message {stream_message}")
+            # self.logger().info(f"Stream message {stream_message}")
             try:
                 channel = stream_message.get("topic", None)
                 data = stream_message.get("data", [])
@@ -610,6 +639,8 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
                         self._account_available_balances.update({asset_name: Decimal(available_balance)})
                 elif CONSTANTS.HUOBI_ORDER_UPDATE_TOPIC2 in channel:
                     safe_ensure_future(self._process_order_update(stream_message))
+                elif CONSTANTS.HUOBI_POSITION_UPDATE_TOPIC2 in channel:
+                    await self._update_positions(data)
                 else:
                     self.logger().info(f"Dont know how to handle stream message {stream_message}")
 
@@ -706,7 +737,8 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
         return {
             "order_books_initialized": self._order_book_tracker.ready,
             "account_balance": len(self._account_balances) > 0 if self._trading_required else True,
-            "trading_rule_initialized": len(self._trading_rules) > 0
+            "trading_rule_initialized": len(self._trading_rules) > 0,
+            "positions_initialized": self._positions_initialized
         }
 
     @property
@@ -726,8 +758,8 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
         path_url = CONSTANTS.PLACE_ORDER_URL
         side = "buy" if is_buy else "sell"
         # source: https://github.com/hbdmapi/huobi_futures_Python/blob/master/alpha/platforms/huobi_usdt_swap_cross_trade.py#L306
-        order_type_str = "limit" if order_type is OrderType.LIMIT else "optimal_20" if OrderType.MARKET else "post_only"
-        # TODO see https://huobiapi.github.io/docs/usdt_swap/v1/en/#isolated-place-an-order for other options like IOC (immediate or cancel)
+        order_type_str = "limit" if order_type == OrderType.LIMIT else "optimal_20" if order_type == OrderType.MARKET else "post_only"
+        # TODO see https://huobiapi.github.io/docs/usdt_swap/v1/en/#cross-place-an-order for other options like IOC (immediate or cancel)
         params = {
             "price": f"{price:f}",
             "volume": f"{amount:f}",
