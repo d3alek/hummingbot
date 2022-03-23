@@ -25,6 +25,18 @@ l^BtDj6Sdx37{<\:<j2P>xm.e
 https://lightsail.aws.amazon.com/ls/remote/ap-northeast-1/instances/para/terminal?protocol=ssh
 
 Ако напишете exit или ви показва терминал, напишете ./start.sh и бота ще започне. Паролата за влизане в бота е:
-razrabotka
+illidan
 
 Като влезете в бота виждате състоянието му. Ако най-отгоре пише Strategy: None значи не е избрана стратегия. Напишете import para.yaml
+
+После го управлявате със start, stop, status
+
+config показва сегашната конфигурация.
+
+За да смените да не отваря позиции а да затваря, направете:
+
+config action_open False
+
+За да смените обратно:
+
+config action_open True

@@ -617,7 +617,9 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
                           trading_pair: str,
                           amount: Decimal,
                           order_type: OrderType,
-                          price: Optional[Decimal] = s_decimal_0):
+                          price: Optional[Decimal] = s_decimal_0,
+                          position_action: PositionAction = None
+                          ):
         trading_rule: TradingRule = self._trading_rules[trading_pair]
 
         decimal_amount = self.quantize_order_amount(trading_pair, amount)
