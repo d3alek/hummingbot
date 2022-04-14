@@ -772,7 +772,8 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
             "direction": side,
             "lever_rate": self._leverage.get(trading_pair, 20),
             "order_price_type": order_type_str,
-            "reduce_only": 1 if position_action == PositionAction.CLOSE else 0
+            # "reduce_only": 1 if position_action == PositionAction.CLOSE else 0
+            "offset": "close" if position_action == PositionAction.CLOSE else "open"
         }
         self.logger().info(f"Place Order params {params}")
         exchange_order_id = await self._api_request(
