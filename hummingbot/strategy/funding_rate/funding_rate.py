@@ -149,9 +149,10 @@ class FundingRateStrategy(StrategyPyBase):
                                                          (self._long_info, self.long_positions, PositionSide.LONG)]:
                         self.logger().info(market_info.market.name)
                         if market_info.market.name == 'huobi_perpetual':
-                            market_info.market.set_trading_pair_position_mode(
-                                market_info.trading_pair,
-                                PositionMode.ONEWAY)
+                            # market_info.market.set_trading_pair_position_mode(
+                            #     market_info.trading_pair,
+                            #     PositionMode.ONEWAY)
+                            pass
                         elif market_info.market.position_mode != PositionMode.ONEWAY or \
                                 len(positions) > 1:
                             self.logger().info(
