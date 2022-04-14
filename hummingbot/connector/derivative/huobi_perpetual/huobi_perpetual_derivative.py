@@ -1060,7 +1060,7 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
         if initial_mode != position_mode:
             exchange_position_mode = "dual_side" if position_mode == PositionMode.HEDGE else "single_side"
             params = {
-                "margin_account": trading_pair,
+                "margin_account": "USDT",
                 "position_mode": exchange_position_mode
             }
             data = await self._api_request("post", path_url=CONSTANTS.SWITCH_POSITION, data=params, is_auth_required=True)
@@ -1074,7 +1074,6 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
     async def _get_trading_pair_position_mode(self, trading_pair: str) -> Optional[PositionMode]:
         # To-do: ensure there's no active order or contract before changing position mode
 
-        # TODO it is not per trading pair, go back in changes
         params = {"margin_account": "USDT"}
         data = await self._api_request("post", path_url=CONSTANTS.POSITION_INFO, data=params, is_auth_required=True)
 
