@@ -320,6 +320,8 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
             positions = data['positions']
 
         for position in positions:
+            self.logger().info("Position is")
+            self.logger().info(position)
             trading_pair = position.get("contract_code")
             position_side = PositionSide.LONG if position.get("direction") == 'buy' else PositionSide.SHORT
             unrealized_pnl = Decimal(position.get("profit_unreal"))
