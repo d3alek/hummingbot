@@ -3,6 +3,7 @@ import logging
 from decimal import Decimal
 from enum import Enum
 from typing import Dict, List, Tuple
+import math
 
 import pandas as pd
 
@@ -289,7 +290,7 @@ class FundingRateStrategy(StrategyPyBase):
             self.logger().warning(f"Expected 1 position in long exhange: {long_positions}")
             return False
 
-        if abs(short_positions[0].amount) == abs(long_positions[0].amount):
+        if math.isclose(abs(short_positions[0].amount), abs(long_positions[0].amount)):
             return True
             # TODO also check other position properties
         else:
