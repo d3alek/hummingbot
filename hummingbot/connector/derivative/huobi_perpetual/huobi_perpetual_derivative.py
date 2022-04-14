@@ -320,13 +320,13 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
             positions = data['positions']
 
         for position in positions:
-            self.logger().info("Position is")
-            self.logger().info(position)
             trading_pair = position.get("contract_code")
             position_side = PositionSide.LONG if position.get("direction") == 'buy' else PositionSide.SHORT
             unrealized_pnl = Decimal(position.get("profit_unreal"))
             entry_price = Decimal(position.get("cost_open"))
             amount = Decimal(position.get("volume"))
+            if trading_pair == 'LOOKS-USDT':
+                amount /= 10
             leverage = Decimal(position.get("lever_rate"))
             pos_key = self.position_key(trading_pair, position_side)
             if amount != 0:
