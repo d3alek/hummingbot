@@ -509,7 +509,7 @@ class FundingRateStrategy(StrategyPyBase):
         for pos in self.short_positions:
             data.append([
                 pos.trading_pair,
-                "LONG" if pos.amount > 0 else "SHORT",
+                "SHORT " + str(pos.position_side),
                 round(pos.entry_price, 6),
                 pos.amount,
                 pos.leverage,
@@ -519,7 +519,7 @@ class FundingRateStrategy(StrategyPyBase):
         for pos in self.long_positions:
             data.append([
                 pos.trading_pair,
-                "LONG" if pos.amount > 0 else "SHORT",
+                "LONG" + str(pos.position_side),
                 pos.entry_price,
                 pos.amount,
                 pos.leverage,
