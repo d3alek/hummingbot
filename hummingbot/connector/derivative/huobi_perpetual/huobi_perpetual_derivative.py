@@ -759,6 +759,8 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
                           order_type: OrderType,
                           price: Decimal,
                           position_action: PositionAction) -> str:
+        if trading_pair == 'LOOKS-USDT':
+            amount *= 10
         path_url = CONSTANTS.PLACE_ORDER_URL
         side = "buy" if is_buy else "sell"
         # source: https://github.com/hbdmapi/huobi_futures_Python/blob/master/alpha/platforms/huobi_usdt_swap_cross_trade.py#L306
