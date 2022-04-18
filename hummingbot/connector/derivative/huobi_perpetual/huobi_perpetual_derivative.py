@@ -369,10 +369,6 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
                 self._trading_rules[trading_rule.trading_pair] = trading_rule
 
     def _format_trading_rules(self, raw_trading_pair_info: List[Dict[str, Any]]) -> List[TradingRule]:
-        # Necessary because contract_size and price_tick otherwise show small deviations
-        from decimal import getcontext
-        getcontext().prec = 10
-
         trading_rules = []
 
         for info in raw_trading_pair_info:
@@ -380,12 +376,12 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
                 if info['contract_status'] != 1:
                     continue
                 min_order_size = Decimal(str(info["contract_size"]))
-                self.logger().info(f"order size Raw {info['contract_size']} processed {min_order_size}")
                 price_increment = Decimal(str(info["price_tick"]))  # info['price_tick'] normally
-                self.logger().info(f"price increment Raw {info['price_tick']} processed {price_increment}")
                 size_increment = min_order_size  # Assumption, can't find anything else in the API response
                 min_quote_amount_increment = price_increment * size_increment
                 min_order_value = min_order_size * price_increment
+                if info["contract_code"] == 'YFI-USDT':
+                    self.logger().info(info)
                 trading_rules.append(
                     TradingRule(trading_pair=info["contract_code"],
                                 min_order_size=min_order_size,
