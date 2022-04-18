@@ -369,6 +369,10 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
                 self._trading_rules[trading_rule.trading_pair] = trading_rule
 
     def _format_trading_rules(self, raw_trading_pair_info: List[Dict[str, Any]]) -> List[TradingRule]:
+        # Necessary because contract_size and price_tick otherwise show small deviations
+        from decimal import getcontext
+        getcontext().prec = 10
+
         trading_rules = []
 
         for info in raw_trading_pair_info:

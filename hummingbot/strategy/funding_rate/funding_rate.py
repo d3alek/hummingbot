@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from decimal import Decimal, getcontext
+from decimal import Decimal
 from enum import Enum
 from typing import Dict, List, Tuple
 import math
@@ -101,8 +101,6 @@ class FundingRateStrategy(StrategyPyBase):
         self.wait_to_cancel = None
         # short_info.market.set_leverage(short_info.trading_pair, self._perp_leverage)
         # long_info.market.set_leverage(long_info.trading_pair, self._perp_leverage)
-
-        getcontext().prec = 10
 
     @property
     def strategy_state(self) -> StrategyState:
