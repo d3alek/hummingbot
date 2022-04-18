@@ -375,8 +375,8 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
             try:
                 if info['contract_status'] != 1:
                     continue
-                min_order_size = Decimal(info["contract_size"])
-                price_increment = Decimal(info["price_tick"])  # info['price_tick'] normally
+                min_order_size = info["contract_size"]
+                price_increment = info["price_tick"]  # info['price_tick'] normally
                 size_increment = min_order_size  # Assumption, can't find anything else in the API response
                 min_quote_amount_increment = price_increment * size_increment
                 min_order_value = min_order_size * price_increment
