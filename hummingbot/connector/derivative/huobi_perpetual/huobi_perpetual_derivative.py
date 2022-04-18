@@ -130,6 +130,7 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
         PerpetualTrading.__init__(self)
 
         self._positions_initialized = False
+        self._contract_sizes = {}
 
     @property
     def name(self) -> str:
@@ -325,8 +326,8 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
             unrealized_pnl = Decimal(position.get("profit_unreal"))
             entry_price = Decimal(position.get("cost_open"))
             amount = Decimal(position.get("volume"))
-            if trading_pair == 'LOOKS-USDT':
-                amount /= 10
+            contract_size = self._contract_sizes[trading_pair]
+            amount = amount * contract_size  # API returns amount in contracts, while the rest of Hummingbot expects it as number of symbols
             leverage = Decimal(position.get("lever_rate"))
             pos_key = self.position_key(trading_pair, position_side)
             if amount != 0:
@@ -375,19 +376,19 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
             try:
                 if info['contract_status'] != 1:
                     continue
-                min_order_size = Decimal(str(info["contract_size"]))
-                price_increment = Decimal(str(info["price_tick"]))  # info['price_tick'] normally
+                contract_size = Decimal(str(info["contract_size"]))
+                price_increment = Decimal(str(info["price_tick"]))
                 min_quote_amount_increment = price_increment
-                min_order_value = min_order_size * price_increment
-                if info["contract_code"] == 'LOOKS-USDT':
-                    self.logger().info(info)
+                min_order_value = price_increment
+                trading_pair = info["contract_code"]
                 trading_rules.append(
-                    TradingRule(trading_pair=info["contract_code"],
-                                min_order_size=min_order_size,
+                    TradingRule(trading_pair=trading_pair,
+                                min_order_size=1,  # in contracts
                                 min_price_increment=price_increment,
-                                min_base_amount_increment=1,  # Assumption, can't find anything in the API response
+                                min_base_amount_increment=1,  # in contracts
                                 min_quote_amount_increment=min_quote_amount_increment,
                                 min_order_value=min_order_value))
+                self._contract_sizes[trading_pair] = contract_size
             except Exception:
                 self.logger().error(f"Error parsing the trading pair rule {info}. Skipping.", exc_info=True)
         return trading_rules
@@ -1018,13 +1019,17 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
         return trading_rule.min_price_increment
 
     def get_order_size_quantum(self, trading_pair: str, order_size):
-        # Huobi Futures API does not return anything useful that I can find
-        # Giving back order_size means that the order size will not be quantized
         return order_size
 
     def quantize_order_amount(self, trading_pair: str, amount, price=s_decimal_0):
         trading_rule = self._trading_rules[trading_pair]
         quantized_amount = ExchangeBase.quantize_order_amount(self, trading_pair, amount)
+        # Huobi Futures place_order API wants volume in contracts, but volume here is the symbol amount,
+        # so convert from symbol amount to contracts here
+
+        contract_size = self._contact_sizes[trading_pair]
+
+        quantized_amount = amount / contract_size
 
         # Check against min_order_size. If not passing check, return 0.
         if quantized_amount < trading_rule.min_order_size:
