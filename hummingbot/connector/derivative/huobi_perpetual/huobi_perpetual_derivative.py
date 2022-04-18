@@ -1023,18 +1023,21 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
     def quantize_order_amount(self, trading_pair: str, amount, price=s_decimal_0):
         trading_rule = self._trading_rules[trading_pair]
         quantized_amount = ExchangeBase.quantize_order_amount(self, trading_pair, amount)
-
+        self.logger().info(f"Amount: {amount} Quantized: {quantized_amount}")
         # Check against min_order_size. If not passing check, return 0.
         if quantized_amount < trading_rule.min_order_size:
+            self.logger().info(f"0 because {quantized_amount} < Min order size {trading_rule.min_order_size}")
             return s_decimal_0
 
         # Check against max_order_size. If not passing check, return maximum.
         if quantized_amount > trading_rule.max_order_size:
+            self.logger().info(f"0 because {quantized_amount} > Max order size {trading_rule.max_order_size}")
             return trading_rule.max_order_size
 
         notional_size = price * quantized_amount
         # Add 1% as a safety factor in case the prices changed while making the order.
         if notional_size < trading_rule.min_notional_size * Decimal("1.01"):
+            self.logger().info(f"0 because notional size {notional_size} < {trading_rule.min_notional_size}")
             return s_decimal_0
 
         return quantized_amount
