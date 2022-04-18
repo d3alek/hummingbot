@@ -343,7 +343,7 @@ class FundingRateStrategy(StrategyPyBase):
                 self._long_info.trading_pair, False,
                 self._chunk_size)
         ]
-        prices = await safe_gather(*tasks, return_exceptions=True)
+        prices = await safe_gather(*tasks)
         short_buy, short_sell, long_buy, long_sell = [*prices]
 
         short_is_buy = self._position_action == PositionAction.CLOSE
