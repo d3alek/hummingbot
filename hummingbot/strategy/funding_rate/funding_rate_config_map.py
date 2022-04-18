@@ -98,23 +98,16 @@ funding_rate_config_map = {
         validator=lambda v: validate_bool(v),
         type_str="bool",
         prompt_on_new=True),
-    # "leverage": ConfigVar(
-    #     key="leverage",
-    #     prompt="How much leverage would you like to use on the perpetual exchange? (Enter 20 to indicate 20X) >>> ",
-    #     type_str="int",
-    #     default=20,
-    #     validator= lambda v: validate_int(v),
-    #     prompt_on_new=True),
-    "maker_slip": ConfigVar(
-        key="maker_slip",
-        prompt="How much buffer do you want to add to the MAKER price (Enter 1 for 1%)? >>> ",
+    "limit_slip": ConfigVar(
+        key="limit_slip",
+        prompt="How much buffer do you want to add to the LIMIT price (Enter 1 for 1%)? >>> ",
         prompt_on_new=True,
         default=Decimal("0.2"),
         validator=lambda v: validate_decimal(v),
         type_str="decimal"),
-    "taker_delta": ConfigVar(
-        key="taker_delta",
-        prompt="How much change to TAKER price is acceptable (Enter 1 for 1%) >>> ",
+    "market_delta": ConfigVar(
+        key="market_delta",
+        prompt="How much change to MARKET price is acceptable (Enter 1 for 1%) >>> ",
         prompt_on_new=True,
         default=Decimal("0.05"),
         validator=lambda v: validate_decimal(v),

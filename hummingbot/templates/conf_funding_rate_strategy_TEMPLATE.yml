@@ -17,6 +17,6 @@ total_amount: null
 chunk_size: null
 action_open: True
 
-maker_slip: null
+limit_slip: null
 
-taker_delta: null
+market_delta: null

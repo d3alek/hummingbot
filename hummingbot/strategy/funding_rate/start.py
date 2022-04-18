@@ -19,8 +19,8 @@ def start(self):
     chunk_size = funding_rate_config_map.get("chunk_size").value
     action_open = funding_rate_config_map.get("action_open").value
 
-    maker_slip = funding_rate_config_map.get("maker_slip").value / Decimal("100")
-    taker_delta = funding_rate_config_map.get("taker_delta").value / Decimal("100")
+    limit_slip = funding_rate_config_map.get("limit_slip").value / Decimal("100")
+    market_delta = funding_rate_config_map.get("market_delta").value / Decimal("100")
 
     self._initialize_markets([(short, [trading_pair]), (long, [trading_pair])])
     base, quote = trading_pair.split("-")
@@ -36,5 +36,5 @@ def start(self):
                               total_amount=total_amount,
                               chunk_size=chunk_size,
                               action_open=action_open,
-                              maker_slip=maker_slip,
-                              taker_delta=taker_delta)
+                              limit_slip=limit_slip,
+                              market_delta=market_delta)

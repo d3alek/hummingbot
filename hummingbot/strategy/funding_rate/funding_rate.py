@@ -71,8 +71,8 @@ class FundingRateStrategy(StrategyPyBase):
                     total_amount: Decimal,
                     chunk_size: Decimal,
                     action_open: bool,
-                    maker_slip: Decimal = Decimal("0"),
-                    taker_delta: Decimal = Decimal("0"),
+                    limit_slip: Decimal = Decimal("0"),
+                    market_delta: Decimal = Decimal("0"),
                     status_report_interval: float = 10):
         self._short_info = short_info
         self._long_info = long_info
@@ -81,8 +81,8 @@ class FundingRateStrategy(StrategyPyBase):
         self._total_amount = total_amount
         self._chunk_size = chunk_size
         self._position_action = PositionAction.OPEN if action_open else PositionAction.CLOSE
-        self._maker_slip = maker_slip
-        self._taker_delta = taker_delta
+        self._limit_slip = limit_slip
+        self._market_delta = market_delta
 
         self._all_markets_ready = False
         self._ev_loop = asyncio.get_event_loop()
@@ -266,7 +266,7 @@ class FundingRateStrategy(StrategyPyBase):
             self.executing_proposal.order_amount)
 
         diff = (taker_price - taker_side.order_price) / taker_side.order_price
-        if abs(diff) > self._taker_delta:
+        if abs(diff) > self._market_delta:
             self.logger().info(f"Taker price {taker_price:.5f} differs from proposal taker price {taker_side.order_price:.5f} by {100*diff:.2f}, cancel maker order")
             self.cancel_order(
                 market_trading_pair_tuple=maker_side.market_info,
@@ -366,7 +366,7 @@ class FundingRateStrategy(StrategyPyBase):
         return proposal
 
     def apply_slippage_buffer(self, order_price, is_buy, market_info):
-        s_buffer = self._maker_slip
+        s_buffer = self._limit_slip
         old_price = order_price
         if not is_buy:
             s_buffer *= Decimal("-1")
@@ -374,7 +374,7 @@ class FundingRateStrategy(StrategyPyBase):
         order_price = market_info.market.quantize_order_price(market_info.trading_pair, order_price)
 
         buy_or_sell = 'BUY' if is_buy else 'SELL'
-        self.logger().info(f"{market_info.market.display_name.capitalize()}:Applied slippage {self._maker_slip} to {buy_or_sell} price {old_price}: {order_price}")
+        self.logger().info(f"{market_info.market.display_name.capitalize()}:Applied slippage {self._limit_slip} to {buy_or_sell} price {old_price}: {order_price}")
         return order_price
 
     def apply_slippage_buffers(self, proposal: Proposal):
