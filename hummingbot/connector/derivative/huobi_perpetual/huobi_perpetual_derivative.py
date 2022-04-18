@@ -1018,8 +1018,9 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
         return trading_rule.min_price_increment
 
     def get_order_size_quantum(self, trading_pair: str, order_size):
-        trading_rule = self._trading_rules[trading_pair]
-        return Decimal(trading_rule.min_base_amount_increment)
+        # Huobi Futures API does not return anything useful that I can find
+        # Giving back order_size means that the order size will not be quantized
+        return order_size
 
     def quantize_order_amount(self, trading_pair: str, amount, price=s_decimal_0):
         trading_rule = self._trading_rules[trading_pair]
