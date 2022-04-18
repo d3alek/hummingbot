@@ -48,6 +48,12 @@ def total_amount_prompt() -> str:
     return f"What is the total of {base_asset} to trade per exchange? >>> "
 
 
+def validate_order_type(value):
+    options = {"limit", "market"}
+    if value.lower() not in options:
+        return f"Invalid order type, please choose value from {options}"
+
+
 funding_rate_config_map = {
     "strategy": ConfigVar(
         key="strategy",
@@ -65,12 +71,11 @@ funding_rate_config_map = {
         prompt_on_new=True,
         validator=validate_derivative,
         on_validated=exchange_on_validated),
-    "short_maker": ConfigVar(
-        key="short_maker",
-        prompt="If True, do MAKER order in SHORT exchange. If False, do MAKER order in LONG exchange >>> ",
+    "short_order_type": ConfigVar(
+        key="short_order_type",
+        prompt="Either LIMIT or MARKET >>> ",
         prompt_on_new=True,
-        validator=lambda v: validate_bool(v),
-        type_str="bool"),
+        validator=lambda v: validate_order_type(v)),
     "trading_pair": ConfigVar(
         key="trading_pair",
         prompt=perpetual_market_prompt,

@@ -2,12 +2,17 @@ from decimal import Decimal
 from hummingbot.strategy.market_trading_pair_tuple import MarketTradingPairTuple
 from hummingbot.strategy.funding_rate.funding_rate import FundingRateStrategy
 from hummingbot.strategy.funding_rate.funding_rate_config_map import funding_rate_config_map
+from hummingbot.core.event.events import OrderType
 
 
 def start(self):
     short = funding_rate_config_map.get("short").value.lower()
     long = funding_rate_config_map.get("long").value.lower()
-    short_maker = funding_rate_config_map.get("short_maker").value
+    short_order_type = funding_rate_config_map.get("short_order_type").value
+    if short_order_type.lower() == 'limit':
+        short_order_type = OrderType.LIMIT_MAKER
+    else:
+        short_order_type = OrderType.MARKET
     trading_pair = funding_rate_config_map.get("trading_pair").value
 
     total_amount = funding_rate_config_map.get("total_amount").value
@@ -27,7 +32,7 @@ def start(self):
     self.strategy = FundingRateStrategy()
     self.strategy.init_params(short_info=short_info,
                               long_info=long_info,
-                              short_maker=short_maker,
+                              short_order_type=short_order_type,
                               total_amount=total_amount,
                               chunk_size=chunk_size,
                               action_open=action_open,

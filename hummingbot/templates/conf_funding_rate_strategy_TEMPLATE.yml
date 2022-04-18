@@ -10,7 +10,7 @@ strategy: null
 # Connectors and markets parameters
 short: null
 long: null
-short_maker: null
+short_order_type: null
 trading_pair: null
 
 total_amount: null
