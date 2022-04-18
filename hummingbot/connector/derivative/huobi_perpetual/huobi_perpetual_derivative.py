@@ -377,16 +377,15 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
                     continue
                 min_order_size = Decimal(str(info["contract_size"]))
                 price_increment = Decimal(str(info["price_tick"]))  # info['price_tick'] normally
-                size_increment = None  # Assumption, can't find anything in the API response
                 min_quote_amount_increment = price_increment
                 min_order_value = min_order_size * price_increment
-                if info["contract_code"] == 'YFI-USDT':
+                if info["contract_code"] == 'LOOKS-USDT':
                     self.logger().info(info)
                 trading_rules.append(
                     TradingRule(trading_pair=info["contract_code"],
                                 min_order_size=min_order_size,
                                 min_price_increment=price_increment,
-                                min_base_amount_increment=size_increment,
+                                min_base_amount_increment=1,  # Assumption, can't find anything in the API response
                                 min_quote_amount_increment=min_quote_amount_increment,
                                 min_order_value=min_order_value))
             except Exception:
@@ -1019,14 +1018,13 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
         return trading_rule.min_price_increment
 
     def get_order_size_quantum(self, trading_pair: str, order_size):
-        raise RuntimeError("Huobi Futures does not provide order size quantum.")
+        trading_rule = self._trading_rules[trading_pair]
+        return Decimal(trading_rule.min_base_amount_increment)
 
     def quantize_order_amount(self, trading_pair: str, amount, price=s_decimal_0):
         trading_rule = self._trading_rules[trading_pair]
-        # quantized_amount = ExchangeBase.quantize_order_amount(self, trading_pair, amount)
-        quantized_amount = amount  # Doing this because we don't have a good min_base_amount_increment from the API
+        quantized_amount = ExchangeBase.quantize_order_amount(self, trading_pair, amount)
 
-        self.logger().info(f"Amount: {amount} Quantized: {quantized_amount} because {trading_rule.min_base_amount_increment}")
         # Check against min_order_size. If not passing check, return 0.
         if quantized_amount < trading_rule.min_order_size:
             self.logger().info(f"0 because {quantized_amount} < Min order size {trading_rule.min_order_size}")
