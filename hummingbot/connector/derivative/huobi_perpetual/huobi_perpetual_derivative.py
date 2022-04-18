@@ -378,7 +378,7 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
                 min_order_size = Decimal(str(info["contract_size"]))
                 price_increment = Decimal(str(info["price_tick"]))  # info['price_tick'] normally
                 size_increment = None  # Assumption, can't find anything in the API response
-                min_quote_amount_increment = price_increment * size_increment
+                min_quote_amount_increment = price_increment
                 min_order_value = min_order_size * price_increment
                 if info["contract_code"] == 'YFI-USDT':
                     self.logger().info(info)
