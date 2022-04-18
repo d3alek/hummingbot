@@ -1025,7 +1025,7 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
         # Huobi Futures place_order API wants volume in contracts, but volume here is the symbol amount,
         # so convert from symbol amount to contracts here
 
-        contract_size = self._contact_sizes[trading_pair]
+        contract_size = self._contract_sizes[trading_pair]
 
         quantized_amount = amount / contract_size
 
