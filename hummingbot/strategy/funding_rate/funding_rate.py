@@ -329,19 +329,18 @@ class FundingRateStrategy(StrategyPyBase):
                 self._strategy_state = StrategyState.POSITIONS_MATCH
 
     async def create_base_proposal(self) -> List[Proposal]:
+        trading_pair = self._short_info.trading_pair
+        short_amount = self._short_info.market.quantize_order_amount(trading_pair, self._chunk_size)
+        long_amount = self._long_info.market.quantize_order_amount(trading_pair, self._chunk_size)
         tasks = [
             self._short_info.market.get_order_price(
-                self._short_info.trading_pair, True,
-                self._chunk_size),
+                trading_pair, True, short_amount),
             self._short_info.market.get_order_price(
-                self._short_info.trading_pair, False,
-                self._chunk_size),
+                trading_pair, False, short_amount),
             self._long_info.market.get_order_price(
-                self._long_info.trading_pair, True,
-                self._chunk_size),
+                trading_pair, True, long_amount),
             self._long_info.market.get_order_price(
-                self._long_info.trading_pair, False,
-                self._chunk_size)
+                trading_pair, False, long_amount)
         ]
         prices = await safe_gather(*tasks)
         short_buy, short_sell, long_buy, long_sell = [*prices]
