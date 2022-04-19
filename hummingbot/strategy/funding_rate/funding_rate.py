@@ -261,9 +261,10 @@ class FundingRateStrategy(StrategyPyBase):
 
         maker_order = maker_orders[0]
 
+        trading_pair = taker_side.market_info.trading_pair
+        taker_amount = taker_side.market_info.market.quantize_order_amount(trading_pair, self.executing_proposal.order_amount)
         taker_price = await taker_side.market_info.market.get_order_price(
-            taker_side.market_info.trading_pair, taker_side.is_buy,
-            self.executing_proposal.order_amount)
+            trading_pair, taker_side.is_buy, taker_amount)
 
         diff = (taker_price - taker_side.order_price) / taker_side.order_price
         if abs(diff) > self._market_delta:
