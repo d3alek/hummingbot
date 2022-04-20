@@ -51,3 +51,6 @@ class Position:
         self._unrealized_pnl = unrealized_pnl if unrealized_pnl is not None else self._unrealized_pnl
         self._entry_price = entry_price if entry_price is not None else self._entry_price
         self._amount = amount if amount is not None else self._amount
+
+    def __repr__(self):
+        return f"Position({self._trading_pair},{self.position_side},{self.amount})"

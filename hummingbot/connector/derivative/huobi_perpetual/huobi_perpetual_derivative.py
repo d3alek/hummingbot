@@ -455,17 +455,20 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
             raise RuntimeError(f"Unknown order status {status}")
 
     async def _update_order_status(self):
-        self.logger().info("Update order status start")
         # The poll interval for order status is 10 seconds.
         last_tick = self._last_poll_timestamp / self.UPDATE_ORDERS_INTERVAL
         current_tick = self.current_timestamp / self.UPDATE_ORDERS_INTERVAL
-        self.logger().info(f"_update_order_status {last_tick} {current_tick}")
-        if current_tick > last_tick and len(self._in_flight_orders) > 0:
+        if current_tick > last_tick:
+            if len(self._in_flight_orders) == 0:
+                self.logger().info("In flight orders are empty")
+                return
+
             tracked_orders = list(self._in_flight_orders.values())
             for tracked_order in tracked_orders:
                 exchange_order_id = await tracked_order.get_exchange_order_id()
+                trading_pair = tracked_order.trading_pair
                 try:
-                    order_update = await self.get_order_status(exchange_order_id, tracked_order.trading_pair)
+                    order_update = await self.get_order_status(exchange_order_id, trading_pair)
                 except HuobiAPIError as e:
                     self.stop_tracking_order(tracked_order.client_order_id)
                     self.logger().info(f"Fail to retrieve order update for {tracked_order.client_order_id} - {e.error_payload}")
@@ -492,7 +495,7 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
 
                 # Calculate the newly executed amount for this update.
                 tracked_order.last_state = str(order_status.value)
-                new_confirmed_amount = Decimal(order_update["trade_volume"])  # probably typo in API (filled)
+                new_confirmed_amount = Decimal(order_update["trade_volume"])
                 execute_amount_diff = new_confirmed_amount - tracked_order.executed_amount_base
 
                 if execute_amount_diff > s_decimal_0:
@@ -569,10 +572,6 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
                             self.MARKET_ORDER_CANCELLED_EVENT_TAG,
                             OrderCancelledEvent(self.current_timestamp,
                                                 tracked_order.client_order_id))
-        else:
-            if current_tick > last_tick:
-                self.logger().info("In flight orders are empty")
-        self.logger().info("Update order status done")
 
     async def _status_polling_loop(self):
         while True:
@@ -703,13 +702,6 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
             event_class = (BuyOrderCompletedEvent
                            if tracked_order.trade_type == TradeType.BUY
                            else SellOrderCompletedEvent)
-
-            try:
-                await asyncio.wait_for(tracked_order.wait_until_completely_filled(), timeout=1)
-            except asyncio.TimeoutError:
-                self.logger().warning(
-                    f"The order fill updates did not arrive on time for {tracked_order.client_order_id}. "
-                    f"The complete update will be processed with estimated fees.")
 
             self.logger().info(f"The {tracked_order.trade_type.name} order {tracked_order.client_order_id} "
                                f"has completed according to order delta websocket API.")
@@ -1008,9 +1000,9 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
             creation_timestamp=self.current_timestamp
         )
 
-    def stop_tracking_order(self, order_id: str):
-        if order_id in self._in_flight_orders:
-            del self._in_flight_orders[order_id]
+    def stop_tracking_order(self, client_order_id: str):
+        if client_order_id in self._in_flight_orders:
+            del self._in_flight_orders[client_order_id]
 
     def get_order_price_quantum(self, trading_pair: str, price):
         trading_rule = self._trading_rules[trading_pair]

@@ -92,19 +92,25 @@ class FundingRateStrategy(StrategyPyBase):
 
         self._main_task = None
         self._in_flight_opening_order_ids = []
-        self._completed_opening_order_ids = []
-        self._completed_closing_order_ids = []
+        self._completed_opening_order_ids = set()
+        self._completed_closing_order_ids = set()
         self._strategy_state = StrategyState.POSITIONS_MATCH
         self._ready_to_start = False
         self._last_arb_op_reported_ts = 0
         self._leverage = 20
         self.wait_to_cancel = None
+        self.wait_to_fill = None
         # short_info.market.set_leverage(short_info.trading_pair, self._perp_leverage)
         # long_info.market.set_leverage(long_info.trading_pair, self._perp_leverage)
 
     @property
     def strategy_state(self) -> StrategyState:
         return self._strategy_state
+
+    @strategy_state.setter
+    def strategy_state(self, value):
+        self.logger().info(f"{self._strategy_state} -> {value}")
+        self._strategy_state = value
 
     @property
     def market_info_to_active_orders(self) -> Dict[MarketTradingPairTuple, List[LimitOrder]]:
@@ -222,9 +228,9 @@ class FundingRateStrategy(StrategyPyBase):
 
         # if self._strategy_state == StrategyState.ERROR:
         #     return
-        if self._strategy_state in (StrategyState.OPENING_MARKET, StrategyState.CLOSING_MARKET):
+        if self.strategy_state in (StrategyState.OPENING_MARKET, StrategyState.CLOSING_MARKET):
             return
-        if self._strategy_state in (StrategyState.OPENING_LIMIT, StrategyState.CLOSING_LIMIT):
+        if self.strategy_state in (StrategyState.OPENING_LIMIT, StrategyState.CLOSING_LIMIT):
             await self.keep_maker_order_up_to_date()
             return
         if self.strategy_state == StrategyState.REACHED_TOTAL_AMOUNT and self._position_action == PositionAction.OPEN:
@@ -299,7 +305,7 @@ class FundingRateStrategy(StrategyPyBase):
             return False
 
     def update_strategy_state(self):
-        if self._strategy_state == StrategyState.OPENING_MARKET and len(self._completed_opening_order_ids) == 2:
+        if self.strategy_state == StrategyState.OPENING_MARKET and len(self._completed_opening_order_ids) == 2:
             if not self.positions_match():
                 self.logger().warning(f"Positions don't match\nSHORT: {self.short_positions}\nLONG:{self.long_positions}")
                 return
@@ -312,11 +318,11 @@ class FundingRateStrategy(StrategyPyBase):
             # Only checking short position as we already know they match
             if abs(self.short_positions[0].amount) == short_total_amount:
                 self.logger().info(f"Reached total amount {self._total_amount}. Done")
-                self._strategy_state = StrategyState.REACHED_TOTAL_AMOUNT
+                self.strategy_state = StrategyState.REACHED_TOTAL_AMOUNT
             else:
-                self._strategy_state = StrategyState.POSITIONS_MATCH
+                self.strategy_state = StrategyState.POSITIONS_MATCH
 
-        elif self._strategy_state == StrategyState.CLOSING_MARKET and len(self._completed_closing_order_ids) == 2:
+        elif self.strategy_state == StrategyState.CLOSING_MARKET and len(self._completed_closing_order_ids) == 2:
             if not self.positions_match():
                 self.logger().warning(f"Positions don't match\nSHORT: {self.short_positions}\nLONG:{self.long_positions}")
                 return
@@ -325,9 +331,9 @@ class FundingRateStrategy(StrategyPyBase):
             # Only checking short position as we already know they match
             if len(self.short_positions) == 0 and len(self.long_positions) == 0:
                 self.logger().info("Closed all positions. Done")
-                self._strategy_state = StrategyState.CLOSED_ALL
+                self.strategy_state = StrategyState.CLOSED_ALL
             else:
-                self._strategy_state = StrategyState.POSITIONS_MATCH
+                self.strategy_state = StrategyState.POSITIONS_MATCH
 
     async def create_base_proposal(self) -> List[Proposal]:
         trading_pair = self._short_info.trading_pair
@@ -459,7 +465,7 @@ class FundingRateStrategy(StrategyPyBase):
         """
         if proposal.order_amount == s_decimal_zero:
             return
-        if self._strategy_state == StrategyState.POSITIONS_MATCH:
+        if self.strategy_state == StrategyState.POSITIONS_MATCH:
             execute_side = proposal.maker_side
             position_action = self._position_action
             if position_action == PositionAction.OPEN:
@@ -467,7 +473,7 @@ class FundingRateStrategy(StrategyPyBase):
             else:
                 next_state = StrategyState.CLOSING_LIMIT
 
-        elif self._strategy_state in [StrategyState.OPENING_LIMIT, StrategyState.CLOSING_LIMIT]:
+        elif self.strategy_state in [StrategyState.OPENING_LIMIT, StrategyState.CLOSING_LIMIT]:
             execute_side = proposal.taker_side
             position_action = self._position_action
             if position_action == PositionAction.OPEN:
@@ -475,7 +481,7 @@ class FundingRateStrategy(StrategyPyBase):
             else:
                 next_state = StrategyState.CLOSING_MARKET
         else:
-            raise RuntimeError(f"Unexpected state for execute_propsal: {self._strategy_state}")
+            raise RuntimeError(f"Unexpected state for execute_propsal: {self.strategy_state}")
 
         order_fn = self.buy_with_specific_market if execute_side.is_buy else self.sell_with_specific_market
         side = "BUY" if execute_side.is_buy else "SELL"
@@ -491,7 +497,7 @@ class FundingRateStrategy(StrategyPyBase):
             price=execute_side.order_price,
             position_action=position_action,
         )
-        self._strategy_state = next_state
+        self.strategy_state = next_state
         if next_state == StrategyState.CLOSING_LIMIT:
             self._completed_closing_order_ids.clear()
             # Now wait for limit order to fill to execute sell part of proposal
@@ -617,39 +623,42 @@ class FundingRateStrategy(StrategyPyBase):
     def did_fill_order(self, event: OrderFilledEvent):
         self.logger().info(f"Partially filled order {event.order_id}")
 
-    def did_complete_buy_order(self, event: BuyOrderCompletedEvent):
+    def on_completed_order(self, event):
+        if self.wait_to_fill != event.order_id:
+            self.logger().warn(f"Unexpected order {event.order_id} got filled while waiting on {self.wait_to_fill}. Ignore")
+            return
         self.update_complete_order_id_lists(event.order_id)
-        if self._strategy_state in [StrategyState.OPENING_LIMIT, StrategyState.CLOSING_LIMIT]:
+        if self.strategy_state in [StrategyState.OPENING_LIMIT, StrategyState.CLOSING_LIMIT]:
             # Execute second part of proposal
             self.execute_proposal(self.executing_proposal)
+
+    def did_complete_buy_order(self, event: BuyOrderCompletedEvent):
+        self.on_completed_order(event)
 
     def did_complete_sell_order(self, event: SellOrderCompletedEvent):
-        self.update_complete_order_id_lists(event.order_id)
-        if self._strategy_state in [StrategyState.OPENING_LIMIT, StrategyState.CLOSING_LIMIT]:
-            # Execute second part of proposal
-            self.execute_proposal(self.executing_proposal)
+        self.on_completed_order(event)
 
     def did_cancel_order(self, event: OrderCancelledEvent):
-        if event.order_id != self.wait_to_cancel:
+        if event.order_id not in [self.wait_to_cancel, self.wait_to_fill]:
             self.logger().info(f"Canceled event {event} does not match {self.wait_to_cancel}")
             return
-        if self._strategy_state == StrategyState.OPENING_LIMIT:
-            self._strategy_state = StrategyState.POSITIONS_MATCH
-        elif self._strategy_state == StrategyState.CLOSING_LIMIT:
-            self._strategy_state = StrategyState.POSITIONS_MATCH
+        if self.strategy_state == StrategyState.OPENING_LIMIT:
+            self.strategy_state = StrategyState.POSITIONS_MATCH
+        elif self.strategy_state == StrategyState.CLOSING_LIMIT:
+            self.strategy_state = StrategyState.POSITIONS_MATCH
         else:
-            self.logger().warn(f"Unexpected state {self._strategy_state} when order got canceled. Ignore if this is cleaning of standing orders at start/end")
+            self.logger().warn(f"Unexpected state {self.strategy_state} when order got canceled. Ignore if this is cleaning of standing orders at start/end")
 
     def did_create_buy_order(self, event: BuyOrderCreatedEvent):
         self.logger().info(f"Created {event.type} BUY order {event.order_id}")
-        self.wait_to_cancel = event.order_id
+        self.wait_to_fill = event.order_id
 
     def did_create_sell_order(self, event: SellOrderCreatedEvent):
         self.logger().info(f"Created {event.type} SELL order {event.order_id}")
-        self.wait_to_cancel = event.order_id
+        self.wait_to_fill = event.order_id
 
     def update_complete_order_id_lists(self, order_id: str):
-        if self._strategy_state in [StrategyState.OPENING_LIMIT, StrategyState.OPENING_MARKET]:
-            self._completed_opening_order_ids.append(order_id)
-        elif self._strategy_state in [StrategyState.CLOSING_LIMIT, StrategyState.CLOSING_MARKET]:
-            self._completed_closing_order_ids.append(order_id)
+        if self.strategy_state in [StrategyState.OPENING_LIMIT, StrategyState.OPENING_MARKET]:
+            self._completed_opening_order_ids.add(order_id)
+        elif self.strategy_state in [StrategyState.CLOSING_LIMIT, StrategyState.CLOSING_MARKET]:
+            self._completed_closing_order_ids.add(order_id)
