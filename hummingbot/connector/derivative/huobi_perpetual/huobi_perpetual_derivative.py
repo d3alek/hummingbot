@@ -64,6 +64,7 @@ hm_logger = None
 s_decimal_0 = Decimal(0)
 s_decimal_NaN = Decimal("NaN")
 HUOBI_ROOT_API = "https://api.huobi.pro/v1"
+DEFAULT_LEVERAGE = 10
 
 
 class HuobiAPIError(IOError):
@@ -764,7 +765,7 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
             "client_order_id": int(order_id),
             "contract_code": convert_to_exchange_trading_pair(trading_pair),
             "direction": side,
-            "lever_rate": self._leverage.get(trading_pair, 20),
+            "lever_rate": self._leverage.get(trading_pair, DEFAULT_LEVERAGE),
             "order_price_type": order_type_str,
             # "reduce_only": 1 if position_action == PositionAction.CLOSE else 0
             "offset": "close" if position_action == PositionAction.CLOSE else "open"

@@ -97,7 +97,7 @@ class FundingRateStrategy(StrategyPyBase):
         self._strategy_state = StrategyState.POSITIONS_MATCH
         self._ready_to_start = False
         self._last_arb_op_reported_ts = 0
-        self._leverage = 20
+        self._leverage = 10
         self.wait_to_cancel = None
         self.wait_to_fill = None
         # short_info.market.set_leverage(short_info.trading_pair, self._perp_leverage)
