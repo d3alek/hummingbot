@@ -100,6 +100,7 @@ class FundingRateStrategy(StrategyPyBase):
         self._leverage = 10
         self.wait_to_cancel = None
         self.wait_to_fill = None
+        self.partially_filled = None
         # short_info.market.set_leverage(short_info.trading_pair, self._perp_leverage)
         # long_info.market.set_leverage(long_info.trading_pair, self._perp_leverage)
 
@@ -273,16 +274,24 @@ class FundingRateStrategy(StrategyPyBase):
             trading_pair, taker_side.is_buy, taker_amount)
 
         diff = (taker_price - taker_side.order_price) / taker_side.order_price
-        if abs(diff) > self._market_delta:
-            self.logger().info(f"Taker price {taker_price:.5f} differs from proposal taker price {taker_side.order_price:.5f} by {100*diff:.2f}, cancel maker order")
+        order_id = maker_order.client_order_id
+        if self.partially_filled == order_id:
+            if self._last_arb_op_reported_ts + 5 < self.current_timestamp:
+                if abs(diff) > self._market_delta:
+                    self.logger().info(f"Taker price {taker_price:.5f} differs from proposal taker price {taker_side.order_price:.5f} by {100*diff:.2f}%. Do not cancel because we have filled partially.")
+                else:
+                    self.logger().info(f"Partially filled maker order {maker_order} is up to date: diff percent {100*diff:.2f}%. Waiting to fill.")
+                self._last_arb_op_reported_ts = self.current_timestamp
+        elif abs(diff) > self._market_delta:
+            self.logger().info(f"Taker price {taker_price:.5f} differs from proposal taker price {taker_side.order_price:.5f} by {100*diff:.2f}%, cancel maker order")
             self.cancel_order(
                 market_trading_pair_tuple=maker_side.market_info,
-                order_id=maker_order.client_order_id)
-            self.wait_to_cancel = maker_order.client_order_id
+                order_id=order_id)
+            self.wait_to_cancel = order_id
             # Now we wait for the cancel complete callback to fire
         else:
             if self._last_arb_op_reported_ts + 5 < self.current_timestamp:
-                self.logger().info(f"Maker order {maker_order} is up to date: diff percent {100*diff:.2f}. Waiting to fill.")
+                self.logger().info(f"Maker order {maker_order} is up to date: diff percent {100*diff:.2f}%. Waiting to fill.")
                 self._last_arb_op_reported_ts = self.current_timestamp
 
     def positions_match(self):
@@ -622,6 +631,7 @@ class FundingRateStrategy(StrategyPyBase):
 
     def did_fill_order(self, event: OrderFilledEvent):
         self.logger().info(f"Partially filled order {event.order_id}")
+        self.partially_filled = event.order_id
 
     def on_completed_order(self, event):
         if self.wait_to_fill != event.order_id:
