@@ -17,11 +17,11 @@ import simplejson
 from async_timeout import timeout
 
 from hummingbot.connector.exchange_base import NaN
-from hummingbot.connector.exchange.ftx.ftx_auth import FtxAuth
-from hummingbot.connector.exchange.ftx.ftx_in_flight_order import FtxInFlightOrder
-from hummingbot.connector.exchange.ftx.ftx_order_book_tracker import FtxOrderBookTracker
-from hummingbot.connector.exchange.ftx.ftx_user_stream_tracker import FtxUserStreamTracker
-from hummingbot.connector.exchange.ftx.ftx_utils import (
+from hummingbot.connector.derivative.ftx_perpetual.ftx_perpetual_auth import FtxPerpetualAuth
+from hummingbot.connector.derivative.ftx_perpetual.ftx_perpetual_in_flight_order import FtxPerpetualInFlightOrder
+from hummingbot.connector.derivative.ftx_perpetual.ftx_perpetual_order_book_tracker import FtxPerpetualOrderBookTracker
+from hummingbot.connector.derivative.ftx_perpetual.ftx_perpetual_user_stream_tracker import FtxPerpetualUserStreamTracker
+from hummingbot.connector.derivative.ftx_perpetual.ftx_perpetual_utils import (
     convert_from_exchange_trading_pair,
     convert_to_exchange_trading_pair
 )
@@ -100,12 +100,12 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
         self._account_available_balances = {}
         self._account_balances = {}
         self._account_id = ""
-        self._ftx_auth = FtxAuth(ftx_api_key, ftx_secret_key, ftx_subaccount_name)
+        self._ftx_auth = FtxPerpetualAuth(ftx_api_key, ftx_secret_key, ftx_subaccount_name)
         self._ev_loop = asyncio.get_event_loop()
         self._in_flight_orders = {}
         self._last_poll_timestamp = 0
         self._last_timestamp = 0
-        self._order_book_tracker = FtxOrderBookTracker(trading_pairs=trading_pairs)
+        self._order_book_tracker = FtxPerpetualOrderBookTracker(trading_pairs=trading_pairs)
         self._order_not_found_records = {}
         self._poll_notifier = asyncio.Event()
         self._poll_interval = poll_interval
@@ -116,7 +116,7 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
         self._trading_rules_polling_task = None
         self._tx_tracker = FtxPerpetualDerivativeTransactionTracker(self)
         self._user_stream_event_listener_task = None
-        self._user_stream_tracker = FtxUserStreamTracker(
+        self._user_stream_tracker = FtxPerpetualUserStreamTracker(
             ftx_auth=self._ftx_auth,
             trading_pairs=trading_pairs)
         self._user_stream_tracker_task = None
@@ -137,7 +137,7 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
         return self._order_book_tracker.order_books
 
     @property
-    def ftx_auth(self) -> FtxAuth:
+    def ftx_auth(self) -> FtxPerpetualAuth:
         return self._ftx_auth
 
     @property
@@ -168,12 +168,12 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
         }
 
     @property
-    def user_stream_tracker(self) -> FtxUserStreamTracker:
+    def user_stream_tracker(self) -> FtxPerpetualUserStreamTracker:
         return self._user_stream_tracker
 
     def restore_tracking_states(self, saved_states: Dict[str, any]):
         self._in_flight_orders.update({
-            key: FtxInFlightOrder.from_json(value)
+            key: FtxPerpetualInFlightOrder.from_json(value)
             for key, value in saved_states.items()
         })
 
@@ -192,7 +192,7 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
         self._tx_tracker.tick(timestamp)
         self._last_timestamp = timestamp
 
-    async def _update_inflight_order(self, tracked_order: FtxInFlightOrder, event: Dict[str, Any]):
+    async def _update_inflight_order(self, tracked_order: FtxPerpetualInFlightOrder, event: Dict[str, Any]):
         issuable_events: List[MarketEvent] = tracked_order.update(event)
 
         # Issue relevent events
@@ -355,7 +355,7 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
                 self._trading_rules[trading_rule.trading_pair] = trading_rule
 
     @property
-    def in_flight_orders(self) -> Dict[str, FtxInFlightOrder]:
+    def in_flight_orders(self) -> Dict[str, FtxPerpetualInFlightOrder]:
         return self._in_flight_orders
 
     def supported_order_types(self):
@@ -529,7 +529,7 @@ class FtxPerpetualDerivative(ExchangeBase, PerpetualTrading):
                              trade_type,
                              price,
                              amount):
-        self._in_flight_orders[order_id] = FtxInFlightOrder(
+        self._in_flight_orders[order_id] = FtxPerpetualInFlightOrder(
             order_id,
             exchange_order_id,
             trading_pair,

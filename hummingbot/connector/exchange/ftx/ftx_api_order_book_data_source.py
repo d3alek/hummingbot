@@ -22,16 +22,10 @@ from hummingbot.core.data_type.order_book_message import OrderBookMessage
 from hummingbot.core.data_type.order_book_tracker_data_source import OrderBookTrackerDataSource
 from hummingbot.logger import HummingbotLogger
 
-from hummingbot.core.data_type.funding_info import FundingInfo
-import copy
-
-import datetime
-
 EXCHANGE_NAME = "ftx"
 
 FTX_REST_URL = "https://ftx.com/api"
 FTX_EXCHANGE_INFO_PATH = "/markets"
-FTX_FUTURE_INFO_PATH = "/futures"
 FTX_WS_FEED = "wss://ftx.com/ws/"
 
 MAX_RETRIES = 20
@@ -56,14 +50,6 @@ class FtxAPIOrderBookDataSource(OrderBookTrackerDataSource):
         super().__init__(trading_pairs)
         self._websocket_connection: Optional[Connection] = None
         self._snapshot_msg: Dict[str, any] = {}
-        self._funding_info: Dict[str, FundingInfo] = {}
-
-    @property
-    def funding_info(self) -> Dict[str, FundingInfo]:
-        return copy.deepcopy(self._funding_info)
-
-    def is_funding_info_initialized(self) -> bool:
-        return all(trading_pair in self._funding_info for trading_pair in self._trading_pairs)
 
     @classmethod
     async def get_last_traded_prices(cls, trading_pairs: List[str]) -> Dict[str, float]:
@@ -84,40 +70,6 @@ class FtxAPIOrderBookDataSource(OrderBookTrackerDataSource):
         record = resp.json()["result"]
         result = (Decimal(record.get("bid", "0")) + Decimal(record.get("ask", "0"))) / Decimal("2")
         return result if result else None
-
-    async def _get_funding_info_from_exchange(self, trading_pair: str) -> FundingInfo:
-        """
-        Fetches the funding information of the given trading pair from the exchange REST API. Parses and returns the
-        respsonse as a FundingInfo data object.
-
-        :param trading_pair: Trading pair of which its Funding Info is to be fetched
-        :type trading_pair: str
-        :return: Funding Information of the given trading pair
-        :rtype: FundingInfo
-        """
-        exchange_trading_pair = convert_to_exchange_trading_pair(trading_pair)
-        async with aiohttp.ClientSession() as client:
-            async with await client.get(f"{FTX_REST_URL}{FTX_FUTURE_INFO_PATH}/{exchange_trading_pair}/stats", timeout=API_CALL_TIMEOUT) as response:
-                response_json = await response.json()
-                self.logger().info(f"Response json: {response_json}")
-                stats = response_json['result']
-                funding_info = FundingInfo(
-                    trading_pair=trading_pair,
-                    index_price=None,
-                    mark_price=None,
-                    next_funding_utc_timestamp=int(datetime.datetime.fromisoformat(stats["nextFundingTime"]).timestamp()),
-                    rate=Decimal(stats["nextFundingRate"]),
-                )
-
-        return funding_info
-
-    async def get_funding_info(self, trading_pair: str) -> FundingInfo:
-        """
-        Returns the FundingInfo of the specified trading pair. If it does not exist, it will query the REST API.
-        """
-        if trading_pair not in self._funding_info:
-            self._funding_info[trading_pair] = await self._get_funding_info_from_exchange(trading_pair)
-        return self._funding_info[trading_pair]
 
     @staticmethod
     async def fetch_trading_pairs() -> List[str]:
