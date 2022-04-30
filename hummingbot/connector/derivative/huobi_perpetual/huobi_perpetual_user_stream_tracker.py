@@ -6,7 +6,7 @@ import logging
 from typing import Optional
 
 from hummingbot.connector.derivative.huobi_perpetual.huobi_perpetual_api_user_stream_data_source import HuobiPerpetualAPIUserStreamDataSource
-from hummingbot.connector.exchange.huobi.huobi_auth import HuobiAuth
+from hummingbot.connector.derivative.huobi_perpetual.huobi_perpetual_auth import HuobiPerpetualAuth
 from hummingbot.core.data_type.user_stream_tracker import UserStreamTracker
 from hummingbot.core.data_type.user_stream_tracker_data_source import UserStreamTrackerDataSource
 from hummingbot.core.utils.async_utils import safe_ensure_future
@@ -25,11 +25,11 @@ class HuobiPerpetualUserStreamTracker(UserStreamTracker):
 
     def __init__(
         self,
-        huobi_auth: Optional[HuobiAuth] = None,
+        huobi_auth: Optional[HuobiPerpetualAuth] = None,
         api_factory: Optional[WebAssistantsFactory] = None,
     ):
         super().__init__()
-        self._huobi_auth: HuobiAuth = huobi_auth
+        self._huobi_auth: HuobiPerpetualAuth = huobi_auth
         self._ev_loop: asyncio.events.AbstractEventLoop = asyncio.get_event_loop()
         self._data_source: Optional[UserStreamTrackerDataSource] = None
         self._user_stream_tracking_task: Optional[asyncio.Task] = None
@@ -45,7 +45,7 @@ class HuobiPerpetualUserStreamTracker(UserStreamTracker):
 
     @property
     def exchange_name(self) -> str:
-        return "huobi_perpetual"
+        return "huobi"
 
     async def start(self):
         self._user_stream_tracking_task = safe_ensure_future(

@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-import copy
+
 
 import hummingbot.connector.exchange.huobi.huobi_constants as CONSTANTS
 
@@ -13,7 +13,7 @@ from typing import (
     List,
     Optional,
 )
-from decimal import Decimal
+
 
 from hummingbot.connector.exchange.huobi.huobi_order_book import HuobiOrderBook
 from hummingbot.connector.exchange.huobi.huobi_utils import (
@@ -29,7 +29,6 @@ from hummingbot.core.web_assistant.rest_assistant import RESTAssistant
 from hummingbot.core.web_assistant.web_assistants_factory import WebAssistantsFactory
 from hummingbot.core.web_assistant.ws_assistant import WSAssistant
 from hummingbot.logger import HummingbotLogger
-from hummingbot.core.data_type.funding_info import FundingInfo
 
 
 class HuobiAPIOrderBookDataSource(OrderBookTrackerDataSource):
@@ -59,14 +58,6 @@ class HuobiAPIOrderBookDataSource(OrderBookTrackerDataSource):
         self._rest_assistant: Optional[RESTAssistant] = None
         self._ws_assistant: Optional[WSAssistant] = None
         self._message_queue: Dict[str, asyncio.Queue] = defaultdict(asyncio.Queue)
-        self._funding_info: Dict[str, FundingInfo] = {}
-
-    @property
-    def funding_info(self) -> Dict[str, FundingInfo]:
-        return copy.deepcopy(self._funding_info)
-
-    def is_funding_info_initialized(self) -> bool:
-        return all(trading_pair in self._funding_info for trading_pair in self._trading_pairs)
 
     async def _get_rest_assistant(self) -> RESTAssistant:
         if self._rest_assistant is None:
@@ -83,19 +74,16 @@ class HuobiAPIOrderBookDataSource(OrderBookTrackerDataSource):
         api_factory = build_api_factory()
         rest_assistant = await api_factory.get_rest_assistant()
 
-        url = CONSTANTS.FUTURES_EX_URL + CONSTANTS.FUTURE_LAST_TRADE_URL
-        params = {"business_type": "swap"}
+        url = CONSTANTS.REST_URL + CONSTANTS.TICKER_URL
         request = RESTRequest(method=RESTMethod.GET,
-                              url=url,
-                              params=params)
+                              url=url)
         response: RESTResponse = await rest_assistant.call(request=request)
 
         results = dict()
-        resp_json = await response.json(content_type=None)
-        resp_json = resp_json['tick']
+        resp_json = await response.json()
         for trading_pair in trading_pairs:
-            resp_record = [o for o in resp_json["data"] if o["contract_code"] == convert_to_exchange_trading_pair(trading_pair)][0]
-            results[trading_pair] = float(resp_record["price"])
+            resp_record = [o for o in resp_json["data"] if o["symbol"] == convert_to_exchange_trading_pair(trading_pair)][0]
+            results[trading_pair] = float(resp_record["close"])
         return results
 
     @staticmethod
@@ -104,19 +92,16 @@ class HuobiAPIOrderBookDataSource(OrderBookTrackerDataSource):
             api_factory = build_api_factory()
             rest_assistant = await api_factory.get_rest_assistant()
 
-            url = CONSTANTS.FUTURES_URL + CONSTANTS.SWAP_INFO
-            params = {"business_type": "swap"}
-
+            url = CONSTANTS.REST_URL + CONSTANTS.API_VERSION + CONSTANTS.SYMBOLS_URL
             request = RESTRequest(method=RESTMethod.GET,
-                                  url=url,
-                                  params=params)
+                                  url=url)
             response: RESTResponse = await rest_assistant.call(request=request)
 
             if response.status == 200:
-                all_symbol_infos: Dict[str, Any] = await response.json(content_type=None)
-                return [symbol_info['contract_code']
+                all_symbol_infos: Dict[str, Any] = await response.json()
+                return [f"{symbol_info['base-currency']}-{symbol_info['quote-currency']}".upper()
                         for symbol_info in all_symbol_infos["data"]
-                        if symbol_info["contract_status"] == 1]
+                        if symbol_info["state"] == "online"]
 
         except Exception:
             # Do nothing if the request fails -- there will be no autocomplete for huobi trading pairs
@@ -126,9 +111,9 @@ class HuobiAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
     async def get_snapshot(self, trading_pair: str) -> Dict[str, Any]:
         rest_assistant = await self._get_rest_assistant()
-        url = CONSTANTS.FUTURES_EX_URL + CONSTANTS.DEPTH_URL
+        url = CONSTANTS.REST_URL + CONSTANTS.DEPTH_URL
         # when type is set to "step0", the default value of "depth" is 150
-        params: Dict = {"contract_code": convert_to_exchange_trading_pair(trading_pair), "type": "step0"}
+        params: Dict = {"symbol": convert_to_exchange_trading_pair(trading_pair), "type": "step0"}
         request = RESTRequest(method=RESTMethod.GET,
                               url=url,
                               params=params)
@@ -137,7 +122,7 @@ class HuobiAPIOrderBookDataSource(OrderBookTrackerDataSource):
         if response.status != 200:
             raise IOError(f"Error fetching Huobi market snapshot for {trading_pair}. "
                           f"HTTP status is {response.status}.")
-        snapshot_data: Dict[str, Any] = await response.json(content_type=None)
+        snapshot_data: Dict[str, Any] = await response.json()
         return snapshot_data
 
     async def get_new_order_book(self, trading_pair: str) -> OrderBook:
@@ -179,7 +164,7 @@ class HuobiAPIOrderBookDataSource(OrderBookTrackerDataSource):
         while True:
             try:
                 ws: WSAssistant = await self._get_ws_assistant()
-                await ws.connect(ws_url=CONSTANTS.WS_FUTURE_PUBLIC_URL, ping_timeout=self.HEARTBEAT_INTERVAL)
+                await ws.connect(ws_url=CONSTANTS.WS_PUBLIC_URL, ping_timeout=self.HEARTBEAT_INTERVAL)
                 await self._subscribe_channels(ws)
 
                 async for ws_response in ws.iter_messages():
@@ -264,52 +249,3 @@ class HuobiAPIOrderBookDataSource(OrderBookTrackerDataSource):
             except Exception:
                 self.logger().error("Unexpected error listening for orderbook snapshots. Retrying in 5 secs...", exc_info=True)
                 await self._sleep(5.0)
-
-    async def _get_funding_info_from_exchange(self, trading_pair: str) -> FundingInfo:
-        """
-        Fetches the funding information of the given trading pair from the exchange REST API. Parses and returns the
-        respsonse as a FundingInfo data object.
-
-        :param trading_pair: Trading pair of which its Funding Info is to be fetched
-        :type trading_pair: str
-        :return: Funding Information of the given trading pair
-        :rtype: FundingInfo
-        """
-        exchange_trading_pair = convert_to_exchange_trading_pair(trading_pair)
-
-        try:
-            api_factory = build_api_factory()
-            rest_assistant = await api_factory.get_rest_assistant()
-
-            url = CONSTANTS.FUTURES_URL + CONSTANTS.FUNDING_RATE_URL
-            params = {"contract_code": exchange_trading_pair}
-            request = RESTRequest(method=RESTMethod.GET,
-                                  url=url,
-                                  params=params)
-            response: RESTResponse = await rest_assistant.call(request=request)
-
-            if response.status == 200:
-                response_json = await response.json(content_type=None)
-                data = response_json['data']
-                funding_info = FundingInfo(
-                    trading_pair=trading_pair,
-                    index_price=None,
-                    mark_price=None,
-                    next_funding_utc_timestamp=int(data["next_funding_time"]),
-                    rate=Decimal(data["funding_rate"]),
-                )
-                return funding_info
-            else:
-                self.logger().warn(f"Could not get funding rate: {response}")
-        except Exception:
-            raise
-
-        return None
-
-    async def get_funding_info(self, trading_pair: str) -> FundingInfo:
-        """
-        Returns the FundingInfo of the specified trading pair. If it does not exist, it will query the REST API.
-        """
-        if trading_pair not in self._funding_info:
-            self._funding_info[trading_pair] = await self._get_funding_info_from_exchange(trading_pair)
-        return self._funding_info[trading_pair]

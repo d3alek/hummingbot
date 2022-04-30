@@ -13,12 +13,12 @@ from typing import (
 import ujson
 
 from hummingbot.connector.derivative.position import Position
-import hummingbot.connector.exchange.huobi.huobi_constants as CONSTANTS
-from hummingbot.connector.exchange.huobi.huobi_auth import HuobiAuth
-from hummingbot.connector.exchange.huobi.huobi_in_flight_order import HuobiInFlightOrder
-from hummingbot.connector.exchange.huobi.huobi_order_book_tracker import HuobiOrderBookTracker
-from hummingbot.connector.exchange.huobi.huobi_user_stream_tracker import HuobiUserStreamTracker
-from hummingbot.connector.exchange.huobi.huobi_utils import (
+import hummingbot.connector.derivative.huobi_perpetual.huobi_perpetual_constants as CONSTANTS
+from hummingbot.connector.derivative.huobi_perpetual.huobi_perpetual_auth import HuobiPerpetualAuth
+from hummingbot.connector.derivative.huobi_perpetual.huobi_perpetual_in_flight_order import HuobiPerpetualInFlightOrder
+from hummingbot.connector.derivative.huobi_perpetual.huobi_perpetual_order_book_tracker import HuobiPerpetualOrderBookTracker
+from hummingbot.connector.derivative.huobi_perpetual.huobi_perpetual_user_stream_tracker import HuobiPerpetualUserStreamTracker
+from hummingbot.connector.derivative.huobi_perpetual.huobi_perpetual_utils import (
     build_api_factory,
     convert_to_exchange_trading_pair,
     get_new_client_order_id,
@@ -104,12 +104,12 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
 
         self._async_scheduler = AsyncCallScheduler(call_interval=0.5)
         self._ev_loop = asyncio.get_event_loop()
-        self._huobi_auth = HuobiAuth(api_key=huobi_api_key, secret_key=huobi_secret_key)
+        self._huobi_auth = HuobiPerpetualAuth(api_key=huobi_api_key, secret_key=huobi_secret_key)
         self._in_flight_orders = {}
         self._last_poll_timestamp = 0
         self._last_timestamp = 0
         self._api_factory = build_api_factory()
-        self._order_book_tracker = HuobiOrderBookTracker(
+        self._order_book_tracker = HuobiPerpetualOrderBookTracker(
             trading_pairs=trading_pairs,
             api_factory=self._api_factory,
         )
@@ -122,8 +122,9 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
         self._tx_tracker = HuobiPerpetualDerivativeTransactionTracker(self)
 
         self._user_stream_event_listener_task = None
-        self._user_stream_tracker = HuobiUserStreamTracker(huobi_auth=self._huobi_auth,
-                                                           api_factory=self._api_factory)
+        self._user_stream_tracker = HuobiPerpetualUserStreamTracker(
+            huobi_auth=self._huobi_auth,
+            api_factory=self._api_factory)
         self._user_stream_tracker_task = None
         self._leverage = {}
 
@@ -138,7 +139,7 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
         return "huobi_perpetual"
 
     @property
-    def order_book_tracker(self) -> HuobiOrderBookTracker:
+    def order_book_tracker(self) -> HuobiPerpetualOrderBookTracker:
         return self._order_book_tracker
 
     @property
@@ -150,7 +151,7 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
         return self._trading_rules
 
     @property
-    def in_flight_orders(self) -> Dict[str, HuobiInFlightOrder]:
+    def in_flight_orders(self) -> Dict[str, HuobiPerpetualInFlightOrder]:
         return self._in_flight_orders
 
     @property
@@ -168,7 +169,7 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
         }
 
     @property
-    def user_stream_tracker(self) -> HuobiUserStreamTracker:
+    def user_stream_tracker(self) -> HuobiPerpetualUserStreamTracker:
         return self._user_stream_tracker
 
     @property
@@ -177,7 +178,7 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
 
     def restore_tracking_states(self, saved_states: Dict[str, Any]):
         self._in_flight_orders.update({
-            key: HuobiInFlightOrder.from_json(value)
+            key: HuobiPerpetualInFlightOrder.from_json(value)
             for key, value in saved_states.items()
         })
 
@@ -990,7 +991,7 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
                              price: Decimal,
                              amount: Decimal):
         """Helper method for testing."""
-        self._in_flight_orders[client_order_id] = HuobiInFlightOrder(
+        self._in_flight_orders[client_order_id] = HuobiPerpetualInFlightOrder(
             client_order_id=client_order_id,
             exchange_order_id=exchange_order_id,
             trading_pair=trading_pair,
