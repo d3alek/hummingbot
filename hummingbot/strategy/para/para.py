@@ -631,6 +631,8 @@ class ParaStrategy(StrategyPyBase):
         if self.strategy_state in [StrategyState.OPENING_LIMIT, StrategyState.CLOSING_LIMIT]:
             # Execute second part of proposal
             self.execute_proposal(self.executing_proposal)
+        else:
+            self.logger().warn(f"Unexpected state {self.strategy_state} on completed order.")
 
     def did_complete_buy_order(self, event: BuyOrderCompletedEvent):
         self.on_completed_order(event)
