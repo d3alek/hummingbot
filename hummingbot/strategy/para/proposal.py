@@ -1,4 +1,7 @@
 from decimal import Decimal
+import logging
+
+from hummingbot.logger import HummingbotLogger
 from hummingbot.strategy.market_trading_pair_tuple import MarketTradingPairTuple
 from hummingbot.core.event.events import OrderType
 s_decimal_nan = Decimal("NaN")
@@ -36,6 +39,14 @@ class Proposal:
     """
     An arbitrage proposal which contains 2 sides of the proposal - one on spot market and one on perpetual market.
     """
+
+    @classmethod
+    def logger(cls) -> HummingbotLogger:
+        global spa_logger
+        if spa_logger is None:
+            spa_logger = logging.getLogger(__name__)
+        return spa_logger
+
     def __init__(self,
                  side1: ProposalSide,
                  side2: ProposalSide,
@@ -49,15 +60,24 @@ class Proposal:
         if side1.is_buy == side2.is_buy:
             raise Exception("Proposals cannot be on the same side.")
         self.buy_side, self.sell_side = (side1, side2) if side1.is_buy else (side2, side1)
-        self.order_amount: Decimal = order_amount  # TODO auto-determine based on market order orderbook, so take it as construction parameter
+        self._order_amount: Decimal = order_amount
 
     def __repr__(self):
         return f"Buy Side: {self.buy_side}\nSell Side: {self.sell_side}\nOrder amount: {self.order_amount}\nPrice: {self.sell_side.order_price}\n"
 
     @property
-    def maker_side(self):
+    def order_amount(self):
+        return self._order_amount
+
+    @order_amount.setter
+    def order_amount(self, value):
+        self.logger().info(f"Order amount changed: {self._order_amount} -> {value}")
+        self._order_amount = value
+
+    @property
+    def limit_side(self):
         return self.buy_side if self.buy_side.order_type == OrderType.LIMIT_MAKER else self.sell_side
 
     @property
-    def taker_side(self):
+    def market_side(self):
         return self.buy_side if self.buy_side.order_type == OrderType.MARKET else self.sell_side

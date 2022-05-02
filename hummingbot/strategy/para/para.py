@@ -50,13 +50,6 @@ class StrategyState(Enum):
 
 
 class ParaStrategy(StrategyPyBase):
-    """
-    This strategy arbitrages between a spot and a perpetual exchange.
-    For a given order amount, the strategy checks for price discrepancy between buy and sell price on the 2 exchanges.
-    Since perpetual contract requires closing position before profit is realised, there are 2 stages to this arbitrage
-    operation - first to open and second to close.
-    """
-
     @classmethod
     def logger(cls) -> HummingbotLogger:
         global spa_logger
@@ -101,6 +94,7 @@ class ParaStrategy(StrategyPyBase):
         self.wait_to_cancel = None
         self.wait_to_fill = None
         self.partially_filled = None
+        self.partially_filled_amount = 0
         # short_info.market.set_leverage(short_info.trading_pair, self._perp_leverage)
         # long_info.market.set_leverage(long_info.trading_pair, self._perp_leverage)
 
@@ -248,14 +242,14 @@ class ParaStrategy(StrategyPyBase):
 
     async def keep_maker_order_up_to_date(self):
         market_info_to_active_orders = self.market_info_to_active_orders
-        maker_side = self.executing_proposal.maker_side
-        maker_orders = market_info_to_active_orders.get(maker_side.market_info, [])
-        taker_side = self.executing_proposal.taker_side
+        limit_side = self.executing_proposal.limit_side
+        maker_orders = market_info_to_active_orders.get(limit_side.market_info, [])
+        market_side = self.executing_proposal.market_side
 
         if len(maker_orders) == 0:
             limit_orders = list(filter(
                 lambda l: l.status == LimitOrderStatus.OPEN,
-                maker_side.market_info.market.limit_orders
+                limit_side.market_info.market.limit_orders
             ))
             if len(limit_orders) == 0:
                 self.logger().info("No maker order found to keep up to date")
@@ -268,24 +262,17 @@ class ParaStrategy(StrategyPyBase):
 
         maker_order = maker_orders[0]
 
-        trading_pair = taker_side.market_info.trading_pair
-        taker_amount = taker_side.market_info.market.quantize_order_amount(trading_pair, self.executing_proposal.order_amount)
-        taker_price = await taker_side.market_info.market.get_order_price(
-            trading_pair, taker_side.is_buy, taker_amount)
+        trading_pair = market_side.market_info.trading_pair
+        taker_amount = market_side.market_info.market.quantize_order_amount(trading_pair, self.executing_proposal.order_amount)
+        taker_price = await market_side.market_info.market.get_order_price(
+            trading_pair, market_side.is_buy, taker_amount)
 
-        diff = (taker_price - taker_side.order_price) / taker_side.order_price
+        diff = (taker_price - market_side.order_price) / market_side.order_price
         order_id = maker_order.client_order_id
-        if self.partially_filled == order_id:
-            if self._last_arb_op_reported_ts + 5 < self.current_timestamp:
-                if abs(diff) > self._market_delta:
-                    self.logger().info(f"Taker price {taker_price:.5f} differs from proposal taker price {taker_side.order_price:.5f} by {100*diff:.2f}%. Do not cancel because we have filled partially.")
-                else:
-                    self.logger().info(f"Partially filled maker order {maker_order} is up to date: diff percent {100*diff:.2f}%. Waiting to fill.")
-                self._last_arb_op_reported_ts = self.current_timestamp
-        elif abs(diff) > self._market_delta:
-            self.logger().info(f"Taker price {taker_price:.5f} differs from proposal taker price {taker_side.order_price:.5f} by {100*diff:.2f}%, cancel maker order")
+        if abs(diff) > self._market_delta:
+            self.logger().info(f"Taker price {taker_price:.5f} differs from proposal taker price {market_side.order_price:.5f} by {100*diff:.2f}%, cancel maker order")
             self.cancel_order(
-                market_trading_pair_tuple=maker_side.market_info,
+                market_trading_pair_tuple=limit_side.market_info,
                 order_id=order_id)
             self.wait_to_cancel = order_id
             # Now we wait for the cancel complete callback to fire
@@ -320,7 +307,6 @@ class ParaStrategy(StrategyPyBase):
                 return
 
             self._completed_opening_order_ids.clear()
-
             short_total_amount = self._short_info.market.quantize_order_amount(
                 self._short_info.trading_pair, self._total_amount)
 
@@ -336,7 +322,6 @@ class ParaStrategy(StrategyPyBase):
                 self.logger().warning(f"Positions don't match\nSHORT: {self.short_positions}\nLONG:{self.long_positions}")
                 return
             self._completed_closing_order_ids.clear()
-
             # Only checking short position as we already know they match
             if len(self.short_positions) == 0 and len(self.long_positions) == 0:
                 self.logger().info("Closed all positions. Done")
@@ -346,8 +331,9 @@ class ParaStrategy(StrategyPyBase):
 
     async def create_base_proposal(self) -> List[Proposal]:
         trading_pair = self._short_info.trading_pair
-        short_amount = self._short_info.market.quantize_order_amount(trading_pair, self._chunk_size)
-        long_amount = self._long_info.market.quantize_order_amount(trading_pair, self._chunk_size)
+        chunk_size = self._chunk_size
+        short_amount = self._short_info.market.quantize_order_amount(trading_pair, chunk_size)
+        long_amount = self._long_info.market.quantize_order_amount(trading_pair, chunk_size)
         tasks = [
             self._short_info.market.get_order_price(
                 trading_pair, True, short_amount),
@@ -376,8 +362,8 @@ class ParaStrategy(StrategyPyBase):
         proposal = Proposal(
             ProposalSide(self._short_info, short_is_buy, short_price, self._short_order_type),
             ProposalSide(self._long_info, long_is_buy, long_price, self._long_order_type),
-            self._chunk_size)
-        self.logger().info(f"Make proposal {proposal} because short price is {short_price}, long price is {long_price}")
+            chunk_size)
+        # self.logger().info(f"Make proposal {proposal} because short price is {short_price}, long price is {long_price}")
         return proposal
 
     def apply_slippage_buffer(self, order_price, is_buy, market_info):
@@ -399,7 +385,7 @@ class ParaStrategy(StrategyPyBase):
         for a sell order, the new order price is 99.
         :param proposal: the arbitrage proposal
         """
-        side = proposal.maker_side
+        side = proposal.limit_side
         side.order_price = self.apply_slippage_buffer(
             side.order_price,
             side.is_buy,
@@ -475,7 +461,7 @@ class ParaStrategy(StrategyPyBase):
         if proposal.order_amount == s_decimal_zero:
             return
         if self.strategy_state == StrategyState.POSITIONS_MATCH:
-            execute_side = proposal.maker_side
+            execute_side = proposal.limit_side
             position_action = self._position_action
             if position_action == PositionAction.OPEN:
                 next_state = StrategyState.OPENING_LIMIT
@@ -483,7 +469,7 @@ class ParaStrategy(StrategyPyBase):
                 next_state = StrategyState.CLOSING_LIMIT
 
         elif self.strategy_state in [StrategyState.OPENING_LIMIT, StrategyState.CLOSING_LIMIT]:
-            execute_side = proposal.taker_side
+            execute_side = proposal.market_side
             position_action = self._position_action
             if position_action == PositionAction.OPEN:
                 next_state = StrategyState.OPENING_MARKET
@@ -630,8 +616,12 @@ class ParaStrategy(StrategyPyBase):
         self._ready_to_start = False
 
     def did_fill_order(self, event: OrderFilledEvent):
-        self.logger().info(f"Partially filled order {event.order_id}")
-        self.partially_filled = event.order_id
+        if self.partially_filled == event.order_id:
+            self.partially_filled_amount += event.amount
+        else:
+            self.partially_filled = event.order_id
+            self.partially_filled_amount = event.amount
+        self.logger().info(f"Partially filled order {self.partially_filled} for total {self.partially_filled_amount}/{self._chunk_size}")
 
     def on_completed_order(self, event):
         if self.wait_to_fill != event.order_id:
@@ -652,10 +642,12 @@ class ParaStrategy(StrategyPyBase):
         if event.order_id not in [self.wait_to_cancel, self.wait_to_fill]:
             self.logger().info(f"Canceled event {event} does not match {self.wait_to_cancel}")
             return
-        if self.strategy_state == StrategyState.OPENING_LIMIT:
-            self.strategy_state = StrategyState.POSITIONS_MATCH
-        elif self.strategy_state == StrategyState.CLOSING_LIMIT:
-            self.strategy_state = StrategyState.POSITIONS_MATCH
+        if self.strategy_state in [StrategyState.OPENING_LIMIT, StrategyState.CLOSING_LIMIT]:
+            if self.partially_filled == event.order_id:
+                self.executing_proposal.order_amount = self.partially_filled_amount
+                self.on_completed_order(event)
+            else:
+                self.strategy_state = StrategyState.POSITIONS_MATCH
         else:
             self.logger().warn(f"Unexpected state {self.strategy_state} when order got canceled. Ignore if this is cleaning of standing orders at start/end")
 
