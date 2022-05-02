@@ -30,7 +30,7 @@ from hummingbot.core.event.events import (
 from hummingbot.core.utils.async_utils import safe_ensure_future, safe_gather
 from hummingbot.logger import HummingbotLogger
 from hummingbot.strategy.market_trading_pair_tuple import MarketTradingPairTuple
-from hummingbot.strategy.funding_rate.proposal import Proposal, ProposalSide
+from hummingbot.strategy.para.proposal import Proposal, ProposalSide
 from hummingbot.strategy.strategy_py_base import StrategyPyBase
 
 NaN = float("nan")
@@ -49,7 +49,7 @@ class StrategyState(Enum):
     # ERROR = 7
 
 
-class FundingRateStrategy(StrategyPyBase):
+class ParaStrategy(StrategyPyBase):
     """
     This strategy arbitrages between a spot and a perpetual exchange.
     For a given order amount, the strategy checks for price discrepancy between buy and sell price on the 2 exchanges.

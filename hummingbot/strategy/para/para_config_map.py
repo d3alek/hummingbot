@@ -1,7 +1,7 @@
 from hummingbot.client.config.config_var import ConfigVar
 from hummingbot.client.config.config_validators import (
     validate_market_trading_pair,
-    validate_derivative,
+    validate_connector,
     validate_decimal,
     validate_bool
 )
@@ -18,32 +18,32 @@ def exchange_on_validated(value: str) -> None:
 
 
 def perpetual_market_validator(value: str) -> None:
-    exchange1 = funding_rate_config_map["short"].value
-    exchange2 = funding_rate_config_map["long"].value
+    exchange1 = para_config_map["short"].value
+    exchange2 = para_config_map["long"].value
     return validate_market_trading_pair(exchange1, value) and validate_market_trading_pair(exchange2, value)
 
 
 def perpetual_market_on_validated(value: str) -> None:
-    requried_connector_trading_pairs[funding_rate_config_map["short"].value] = [value]
-    requried_connector_trading_pairs[funding_rate_config_map["long"].value] = [value]
+    requried_connector_trading_pairs[para_config_map["short"].value] = [value]
+    requried_connector_trading_pairs[para_config_map["long"].value] = [value]
 
 
 def perpetual_market_prompt() -> str:
-    connector1 = funding_rate_config_map.get("short").value
-    connector2 = funding_rate_config_map.get("long").value
+    connector1 = para_config_map.get("short").value
+    connector2 = para_config_map.get("long").value
     example = AllConnectorSettings.get_example_pairs().get(connector1)
     return "Enter the token trading pair you would like to trade on %s%s >>> " \
            % (f"{connector1} and {connector2}", f" (e.g. {example})" if example else "")
 
 
 def order_amount_prompt() -> str:
-    trading_pair = funding_rate_config_map["trading_pair"].value
+    trading_pair = para_config_map["trading_pair"].value
     base_asset, quote_asset = trading_pair.split("-")
     return f"What is the amount of {base_asset} per order? >>> "
 
 
 def total_amount_prompt() -> str:
-    trading_pair = funding_rate_config_map["trading_pair"].value
+    trading_pair = para_config_map["trading_pair"].value
     base_asset, quote_asset = trading_pair.split("-")
     return f"What is the total of {base_asset} to trade per exchange? >>> "
 
@@ -54,7 +54,7 @@ def validate_order_type(value):
         return f"Invalid order type, please choose value from {options}"
 
 
-funding_rate_config_map = {
+para_config_map = {
     "strategy": ConfigVar(
         key="strategy",
         prompt="",
@@ -63,13 +63,13 @@ funding_rate_config_map = {
         key="short",
         prompt="Where to SHORT (Exchange/AMM) >>> ",
         prompt_on_new=True,
-        validator=validate_derivative,
+        validator=validate_connector,
         on_validated=exchange_on_validated),
     "long": ConfigVar(
         key="long",
         prompt="Where to LONG (Exchange/AMM) >>> ",
         prompt_on_new=True,
-        validator=validate_derivative,
+        validator=validate_connector,
         on_validated=exchange_on_validated),
     "short_order_type": ConfigVar(
         key="short_order_type",

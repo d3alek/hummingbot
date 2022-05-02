@@ -1,13 +1,10 @@
 ##########################################
-###   Spot-Perpetual Arbitrage strategy config   ###
+###   Perpetual-Perpetual Arbitrage strategy config   ###
 ##########################################
 
 template_version: 3
 strategy: null
 
-# The following configuations are only required for the AMM arbitrage trading strategy
-
-# Connectors and markets parameters
 short: null
 long: null
 short_order_type: null
