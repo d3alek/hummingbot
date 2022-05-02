@@ -6,6 +6,7 @@ from hummingbot.strategy.market_trading_pair_tuple import MarketTradingPairTuple
 from hummingbot.core.event.events import OrderType
 s_decimal_nan = Decimal("NaN")
 s_decimal_0 = Decimal("0")
+spa_logger = None
 
 
 class ProposalSide:
