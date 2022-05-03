@@ -51,7 +51,7 @@ class StrategyState(Enum):
 
 def check_derivative(market_info):
     from hummingbot.client.settings import AllConnectorSettings
-    return market_info.name in AllConnectorSettings.get_derivative_names()
+    return market_info.market.name in AllConnectorSettings.get_derivative_names()
 
 
 class ParaStrategy(StrategyPyBase):
@@ -634,7 +634,7 @@ class ParaStrategy(StrategyPyBase):
                 float(mid_price)
             ])
             if not market.ready:
-                not_ready.update(market.status_dict)
+                not_ready[market.name] = market.status_dict
         markets_df = pd.DataFrame(data=data, columns=columns)
         lines = []
         lines.extend(["", "  Markets:"] + ["    " + line for line in markets_df.to_string(index=False).split("\n")])
@@ -662,7 +662,7 @@ class ParaStrategy(StrategyPyBase):
             lines.extend(["", "*** WARNINGS ***"] + warning_lines)
 
         if not_ready:
-            lines.append(f"{not_ready}")
+            lines.append(f"Not ready: {not_ready}")
 
         lines.append(f"Strategy State: {self.strategy_state}")
         return "\n".join(lines)
@@ -738,7 +738,7 @@ class ParaStrategy(StrategyPyBase):
         if event.order_id not in [self.wait_to_cancel, self.wait_to_fill]:
             self.logger().info(f"Canceled event {event} does not match {self.wait_to_cancel}")
             return
-        if self.strategy_state == StrategyState.WAIT_TO_CANCEL_LIMIT:
+        if self.strategy_state in [StrategyState.OPENING_LIMIT, StrategyState.CLOSING_LIMIT, StrategyState.WAIT_TO_CANCEL_LIMIT]:
             self.process_cancel(event.order_id)
         else:
             self.logger().warn(f"Unexpected state {self.strategy_state} when order got canceled. Ignore if this is cleaning of standing orders at start/end")
