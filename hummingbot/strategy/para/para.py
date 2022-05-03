@@ -276,8 +276,8 @@ class ParaStrategy(StrategyPyBase):
         limit_orders = self.get_limit_orders()
         if len(limit_orders) == 0:
             self.logger().info(f"No limit order found, assume {self.wait_to_cancel} was cancelled")
-            self.wait_to_cancel = None
             self.process_cancel(self.wait_to_cancel)
+            self.wait_to_cancel = None
         else:
             if self._last_reported_ts + 5 < self.current_timestamp:
                 self.logger().info(f"Limit orders: {len(limit_orders)}. Waiting to cancel.")
