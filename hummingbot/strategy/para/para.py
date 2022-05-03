@@ -46,7 +46,7 @@ class StrategyState(Enum):
     CLOSING_MARKET = 4
     REACHED_TOTAL_AMOUNT = 5
     CLOSED_ALL = 6
-    # ERROR = 7
+    WAIT_TO_CANCEL_LIMIT = 7
 
 
 class ParaStrategy(StrategyPyBase):
@@ -89,7 +89,7 @@ class ParaStrategy(StrategyPyBase):
         self._completed_closing_order_ids = set()
         self._strategy_state = StrategyState.POSITIONS_MATCH
         self._ready_to_start = False
-        self._last_arb_op_reported_ts = 0
+        self._last_reported_ts = 0
         self._leverage = 10
         self.wait_to_cancel = None
         self.wait_to_fill = None
@@ -219,14 +219,17 @@ class ParaStrategy(StrategyPyBase):
         """
         The main procedure for the arbitrage strategy.
         """
-        self.update_strategy_state()
 
         # if self._strategy_state == StrategyState.ERROR:
         #     return
         if self.strategy_state in (StrategyState.OPENING_MARKET, StrategyState.CLOSING_MARKET):
+            self.check_market_order_complete()
             return
         if self.strategy_state in (StrategyState.OPENING_LIMIT, StrategyState.CLOSING_LIMIT):
-            await self.keep_maker_order_up_to_date()
+            await self.keep_limit_order_up_to_date()
+            return
+        if self.strategy_state == StrategyState.WAIT_TO_CANCEL_LIMIT:
+            self.check_limit_cancelled()
             return
         if self.strategy_state == StrategyState.REACHED_TOTAL_AMOUNT and self._position_action == PositionAction.OPEN:
             return
@@ -240,46 +243,64 @@ class ParaStrategy(StrategyPyBase):
         if self.check_budget_constraint(proposal):
             self.execute_proposal(proposal)
 
-    async def keep_maker_order_up_to_date(self):
+    def get_limit_orders(self):
         market_info_to_active_orders = self.market_info_to_active_orders
         limit_side = self.executing_proposal.limit_side
-        maker_orders = market_info_to_active_orders.get(limit_side.market_info, [])
-        market_side = self.executing_proposal.market_side
+        limit_orders = market_info_to_active_orders.get(limit_side.market_info, [])
 
-        if len(maker_orders) == 0:
+        if len(limit_orders) == 0:
             limit_orders = list(filter(
                 lambda l: l.status == LimitOrderStatus.OPEN,
                 limit_side.market_info.market.limit_orders
             ))
-            if len(limit_orders) == 0:
-                self.logger().info("No maker order found to keep up to date")
-                return
-            else:
+            if len(limit_orders) > 0:
                 self.logger().warn(f"Recovered {len(limit_orders)} limit orders")
-                maker_orders = limit_orders
-        elif len(maker_orders) > 1:
-            raise RuntimeError(f"More than 1 maker orders: {len(maker_orders)} found: {maker_orders}")
 
-        maker_order = maker_orders[0]
+        return limit_orders
+
+    def check_limit_cancelled(self):
+        limit_orders = self.get_limit_orders()
+        if len(limit_orders) == 0:
+            self.logger().info(f"No limit order found, assume {self.wait_to_cancel} was cancelled")
+            self.wait_to_cancel = None
+            self.process_cancel(self.wait_to_cancel)
+        else:
+            if self._last_reported_ts + 5 < self.current_timestamp:
+                self.logger().info(f"Limit orders: {len(limit_orders)}. Waiting to cancel.")
+                self._last_reported_ts = self.current_timestamp
+
+    async def keep_limit_order_up_to_date(self):
+        limit_side = self.executing_proposal.limit_side
+        market_side = self.executing_proposal.market_side
+        limit_orders = self.get_limit_orders()
+
+        if len(limit_orders) == 0:
+            self.logger().info("No limit order found to keep up to date")
+            return
+
+        elif len(limit_orders) > 1:
+            raise RuntimeError(f"More than 1 limit orders: {len(limit_orders)} found: {limit_orders}")
+        limit_order = limit_orders[0]
 
         trading_pair = market_side.market_info.trading_pair
-        taker_amount = market_side.market_info.market.quantize_order_amount(trading_pair, self.executing_proposal.order_amount)
-        taker_price = await market_side.market_info.market.get_order_price(
-            trading_pair, market_side.is_buy, taker_amount)
+        market_amount = market_side.market_info.market.quantize_order_amount(trading_pair, self.executing_proposal.order_amount)
+        market_price = await market_side.market_info.market.get_order_price(
+            trading_pair, market_side.is_buy, market_amount)
 
-        diff = (taker_price - market_side.order_price) / market_side.order_price
-        order_id = maker_order.client_order_id
+        diff = (market_price - market_side.order_price) / market_side.order_price
+        order_id = limit_order.client_order_id
         if abs(diff) > self._market_delta:
-            self.logger().info(f"Taker price {taker_price:.5f} differs from proposal taker price {market_side.order_price:.5f} by {100*diff:.2f}%, cancel maker order")
+            self.logger().info(f"Market price {market_price:.5f} differs from proposal market price {market_side.order_price:.5f} by {100*diff:.2f}%, cancel limit order")
             self.cancel_order(
                 market_trading_pair_tuple=limit_side.market_info,
                 order_id=order_id)
             self.wait_to_cancel = order_id
+            self.strategy_state = StrategyState.WAIT_TO_CANCEL_LIMIT
             # Now we wait for the cancel complete callback to fire
         else:
-            if self._last_arb_op_reported_ts + 5 < self.current_timestamp:
-                self.logger().info(f"Maker order {maker_order} is up to date: diff percent {100*diff:.2f}%. Waiting to fill.")
-                self._last_arb_op_reported_ts = self.current_timestamp
+            if self._last_reported_ts + 5 < self.current_timestamp:
+                self.logger().info(f"Limit order {limit_order} is up to date: diff percent {100*diff:.2f}%. Waiting to fill.")
+                self._last_reported_ts = self.current_timestamp
 
     def positions_match(self):
         short_positions, long_positions = self.short_positions, self.long_positions
@@ -300,7 +321,7 @@ class ParaStrategy(StrategyPyBase):
         else:
             return False
 
-    def update_strategy_state(self):
+    def check_market_order_complete(self):
         if self.strategy_state == StrategyState.OPENING_MARKET and len(self._completed_opening_order_ids) == 2:
             if not self.positions_match():
                 self.logger().warning(f"Positions don't match\nSHORT: {self.short_positions}\nLONG:{self.long_positions}")
@@ -623,33 +644,40 @@ class ParaStrategy(StrategyPyBase):
             self.partially_filled_amount = event.amount
         self.logger().info(f"Partially filled order {self.partially_filled} for total {self.partially_filled_amount}/{self._chunk_size}")
 
-    def on_completed_order(self, event):
-        if self.wait_to_fill != event.order_id:
-            self.logger().warn(f"Unexpected order {event.order_id} got filled while waiting on {self.wait_to_fill}. Ignore")
+    def process_completed_order(self, order_id):
+        if self.wait_to_fill != order_id:
+            self.logger().warn(f"Unexpected order {order_id} got filled while waiting on {self.wait_to_fill}. Ignore")
             return
-        self.update_complete_order_id_lists(event.order_id)
+        self.update_complete_order_id_lists(order_id)
         if self.strategy_state in [StrategyState.OPENING_LIMIT, StrategyState.CLOSING_LIMIT]:
             # Execute second part of proposal
             self.execute_proposal(self.executing_proposal)
+        elif self.strategy_state in [StrategyState.OPENING_MARKET, StrategyState.CLOSING_MARKET]:
+            self.logger().warn(f"Market order {order_id} completed")
         else:
             self.logger().warn(f"Unexpected state {self.strategy_state} on completed order.")
 
     def did_complete_buy_order(self, event: BuyOrderCompletedEvent):
-        self.on_completed_order(event)
+        self.process_completed_order(event.order_id)
 
     def did_complete_sell_order(self, event: SellOrderCompletedEvent):
-        self.on_completed_order(event)
+        self.process_completed_order(event.order_id)
+
+    def process_cancel(self, order_id):
+        if self.partially_filled == order_id:
+            # If any of the cancelled order got filled, process it as if the partially filled amount was a complete order
+            # That is, hedge it in Market side.
+            self.executing_proposal.order_amount = self.partially_filled_amount
+            self.process_completed_order(order_id)
+        else:
+            self.strategy_state = StrategyState.POSITIONS_MATCH
 
     def did_cancel_order(self, event: OrderCancelledEvent):
         if event.order_id not in [self.wait_to_cancel, self.wait_to_fill]:
             self.logger().info(f"Canceled event {event} does not match {self.wait_to_cancel}")
             return
-        if self.strategy_state in [StrategyState.OPENING_LIMIT, StrategyState.CLOSING_LIMIT]:
-            if self.partially_filled == event.order_id:
-                self.executing_proposal.order_amount = self.partially_filled_amount
-                self.on_completed_order(event)
-            else:
-                self.strategy_state = StrategyState.POSITIONS_MATCH
+        if self.strategy_state == StrategyState.WAIT_TO_CANCEL_LIMIT:
+            self.process_cancel(event.order_id)
         else:
             self.logger().warn(f"Unexpected state {self.strategy_state} when order got canceled. Ignore if this is cleaning of standing orders at start/end")
 
