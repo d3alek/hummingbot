@@ -12,7 +12,7 @@ from hummingbot.connector.derivative.position import Position
 from hummingbot.core.clock import Clock
 from hummingbot.core.data_type.limit_order import LimitOrder
 from hummingbot.core.data_type.market_order import MarketOrder
-from hummingbot.core.data_type.order_candidate import PerpetualOrderCandidate
+from hummingbot.core.data_type.order_candidate import OrderCandidate, PerpetualOrderCandidate
 from hummingbot.core.event.events import (
     BuyOrderCompletedEvent,
     OrderType,
@@ -49,6 +49,11 @@ class StrategyState(Enum):
     WAIT_TO_CANCEL_LIMIT = 7
 
 
+def check_derivative(market_info):
+    from hummingbot.client.settings import AllConnectorSettings
+    return market_info.name in AllConnectorSettings.get_derivative_names()
+
+
 class ParaStrategy(StrategyPyBase):
     @classmethod
     def logger(cls) -> HummingbotLogger:
@@ -68,7 +73,9 @@ class ParaStrategy(StrategyPyBase):
                     market_delta: Decimal = Decimal("0"),
                     status_report_interval: float = 10):
         self._short_info = short_info
+        self._short_is_derivative = check_derivative(short_info)
         self._long_info = long_info
+        self._long_is_derivative = check_derivative(long_info)
         self._short_order_type = short_order_type
         self._long_order_type = OrderType.MARKET if short_order_type == OrderType.LIMIT_MAKER else OrderType.LIMIT_MAKER
         self._total_amount = total_amount
@@ -117,11 +124,11 @@ class ParaStrategy(StrategyPyBase):
 
     @property
     def short_positions(self) -> List[Position]:
-        return self.positions(self._short_info)
+        return self.positions(self._short_info) if self._short_is_derivative else []
 
     @property
     def long_positions(self) -> List[Position]:
-        return self.positions(self._long_info)
+        return self.positions(self._long_info) if self._long_is_derivative else []
 
     def tick(self, timestamp: float):
         """
@@ -145,9 +152,14 @@ class ParaStrategy(StrategyPyBase):
                         self.logger().warning(f"Positions don't match\nSHORT: {self.short_positions}\nLONG:{self.long_positions}")
                         return
 
+                    derivatives = []
+                    if self._short_is_derivative:
+                        derivatives.append((self._short_info, self.short_positions, PositionSide.SHORT))
+                    if self._long_is_derivative:
+                        derivatives.append((self._long_info, self.long_positions, PositionSide.LONG))
+
                     unmatched_positions = []
-                    for market_info, positions, side in [(self._short_info, self.short_positions, PositionSide.SHORT),
-                                                         (self._long_info, self.long_positions, PositionSide.LONG)]:
+                    for market_info, positions, side in derivatives:
                         self.logger().info(market_info.market.name)
                         if market_info.market.name == 'huobi_perpetual':
                             # market_info.market.set_trading_pair_position_mode(
@@ -187,6 +199,7 @@ class ParaStrategy(StrategyPyBase):
                                     self._ready_to_start = True
                             else:
                                 unmatched_positions.append(position)
+
                     if len(unmatched_positions) == 0:
                         pass
                     elif len(unmatched_positions) == 2:
@@ -303,6 +316,9 @@ class ParaStrategy(StrategyPyBase):
                 self._last_reported_ts = self.current_timestamp
 
     def positions_match(self):
+        if not (self._short_is_derivative and self._long_is_derivative):
+            return True
+
         short_positions, long_positions = self.short_positions, self.long_positions
         if len(short_positions) == 0 and len(long_positions) == 0:
             return True
@@ -328,11 +344,19 @@ class ParaStrategy(StrategyPyBase):
                 return
 
             self._completed_opening_order_ids.clear()
-            short_total_amount = self._short_info.market.quantize_order_amount(
-                self._short_info.trading_pair, self._total_amount)
+            if self._short_is_derivative:
+                market_info = self._short_info
+            elif self._long_is_derivative:
+                market_info = self._long_info
+            else:
+                self.logger().warning("Expected either short or long to be derivative. Now we can't check if we have reached total amount. Assume we did.")
+                self.strategy_state = StrategyState.REACHED_TOTAL_AMOUNT
+                return
 
-            # Only checking short position as we already know they match
-            if abs(self.short_positions[0].amount) == short_total_amount:
+            total_amount = market_info.market.quantize_order_amount(
+                market_info.trading_pair, self._total_amount)
+
+            if abs(self.positions(market_info)[0].amount) == total_amount:
                 self.logger().info(f"Reached total amount {self._total_amount}. Done")
                 self.strategy_state = StrategyState.REACHED_TOTAL_AMOUNT
             else:
@@ -343,8 +367,16 @@ class ParaStrategy(StrategyPyBase):
                 self.logger().warning(f"Positions don't match\nSHORT: {self.short_positions}\nLONG:{self.long_positions}")
                 return
             self._completed_closing_order_ids.clear()
-            # Only checking short position as we already know they match
-            if len(self.short_positions) == 0 and len(self.long_positions) == 0:
+            if self._short_is_derivative:
+                market_info = self._short_info
+            elif self._long_is_derivative:
+                market_info = self._long_info
+            else:
+                self.logger().warning("Expected either short or long to be derivative. Now we can't check if we have closed all. Assume we did.")
+                self.strategy_state = StrategyState.CLOSED_ALL
+                return
+
+            if len(self.positions(market_info)) == 0:
                 self.logger().info("Closed all positions. Done")
                 self.strategy_state = StrategyState.CLOSED_ALL
             else:
@@ -381,8 +413,8 @@ class ParaStrategy(StrategyPyBase):
             long_price = fn(short_price, long_price)
 
         proposal = Proposal(
-            ProposalSide(self._short_info, short_is_buy, short_price, self._short_order_type),
-            ProposalSide(self._long_info, long_is_buy, long_price, self._long_order_type),
+            ProposalSide(self._short_info, short_is_buy, short_price, self._short_order_type, self._short_is_derivative),
+            ProposalSide(self._long_info, long_is_buy, long_price, self._long_order_type, self._long_is_derivative),
             chunk_size)
         # self.logger().info(f"Make proposal {proposal} because short price is {short_price}, long price is {long_price}")
         return proposal
@@ -437,7 +469,34 @@ class ParaStrategy(StrategyPyBase):
         :param proposal: An arbitrage proposal
         :return: True if user has available balance enough for both orders submission.
         """
-        return self.check_perpetual_budget_constraint(proposal)
+        return self.check_spot_budget_constraint(proposal) and self.check_perpetual_budget_constraint(proposal)
+
+    def check_spot_budget_constraint(self, proposal: Proposal) -> bool:
+        for proposal_side in [proposal.buy_side, proposal.sell_side]:
+            if proposal_side.is_derivative:
+                continue
+            order_amount = proposal.order_amount
+            market_info = proposal_side.market_info
+            budget_checker = market_info.market.budget_checker
+            order_candidate = OrderCandidate(
+                trading_pair=market_info.trading_pair,
+                is_maker=False,
+                order_type=OrderType.LIMIT,
+                order_side=TradeType.BUY if proposal_side.is_buy else TradeType.SELL,
+                amount=order_amount,
+                price=proposal_side.order_price,
+            )
+
+            adjusted_candidate_order = budget_checker.adjust_candidate(order_candidate, all_or_none=True)
+
+            if adjusted_candidate_order.amount < order_amount:
+                self.logger().info(
+                    f"Cannot arbitrage, {proposal_side.market_info.market.display_name} balance"
+                    f" is insufficient to place the order candidate {order_candidate}."
+                )
+                return False
+
+        return True
 
     def check_perpetual_budget_constraint(self, proposal: Proposal) -> bool:
         """
@@ -446,6 +505,8 @@ class ParaStrategy(StrategyPyBase):
         :return: True if user has available balance enough for both orders submission.
         """
         for proposal_side in [proposal.buy_side, proposal.sell_side]:
+            if not proposal_side.is_derivative:
+                continue
             order_amount = proposal.order_amount
             market_info = proposal_side.market_info
             budget_checker = market_info.market.budget_checker
@@ -483,16 +544,16 @@ class ParaStrategy(StrategyPyBase):
             return
         if self.strategy_state == StrategyState.POSITIONS_MATCH:
             execute_side = proposal.limit_side
-            position_action = self._position_action
-            if position_action == PositionAction.OPEN:
+            position_action = self._position_action if execute_side.is_derivative else None
+            if self._position_action == PositionAction.OPEN:
                 next_state = StrategyState.OPENING_LIMIT
             else:
                 next_state = StrategyState.CLOSING_LIMIT
 
         elif self.strategy_state in [StrategyState.OPENING_LIMIT, StrategyState.CLOSING_LIMIT]:
             execute_side = proposal.market_side
-            position_action = self._position_action
-            if position_action == PositionAction.OPEN:
+            position_action = self._position_action if execute_side.is_derivative else None
+            if self._position_action == PositionAction.OPEN:
                 next_state = StrategyState.OPENING_MARKET
             else:
                 next_state = StrategyState.CLOSING_MARKET
@@ -529,25 +590,26 @@ class ParaStrategy(StrategyPyBase):
         """
         columns = ["Symbol", "Type", "Entry Price", "Amount", "Leverage", "Unrealized PnL"]
         data = []
-        for pos in self.short_positions:
-            data.append([
-                pos.trading_pair,
-                str(pos.position_side),
-                round(pos.entry_price, 6),
-                pos.amount,
-                pos.leverage,
-                pos.unrealized_pnl
-            ])
-
-        for pos in self.long_positions:
-            data.append([
-                pos.trading_pair,
-                str(pos.position_side),
-                pos.entry_price,
-                pos.amount,
-                pos.leverage,
-                pos.unrealized_pnl
-            ])
+        if self._short_is_derivative:
+            for pos in self.short_positions:
+                data.append([
+                    pos.trading_pair,
+                    str(pos.position_side),
+                    round(pos.entry_price, 6),
+                    pos.amount,
+                    pos.leverage,
+                    pos.unrealized_pnl
+                ])
+        if self._long_is_derivative:
+            for pos in self.long_positions:
+                data.append([
+                    pos.trading_pair,
+                    str(pos.position_side),
+                    pos.entry_price,
+                    pos.amount,
+                    pos.leverage,
+                    pos.unrealized_pnl
+                ])
 
         return pd.DataFrame(data=data, columns=columns)
 

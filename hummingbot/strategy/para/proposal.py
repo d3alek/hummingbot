@@ -17,7 +17,8 @@ class ProposalSide:
                  market_info: MarketTradingPairTuple,
                  is_buy: bool,
                  order_price: Decimal,
-                 order_type: OrderType
+                 order_type: OrderType,
+                 is_derivative: bool
                  ):
         """
         :param market_info: The market where to submit the order
@@ -28,6 +29,7 @@ class ProposalSide:
         self.is_buy: bool = is_buy
         self.order_price: Decimal = order_price
         self.order_type = order_type
+        self.is_derivative = is_derivative
 
     def __repr__(self):
         side = "Buy" if self.is_buy else "Sell"
