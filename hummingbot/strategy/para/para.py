@@ -102,6 +102,7 @@ class ParaStrategy(StrategyPyBase):
         self.wait_to_fill = None
         self.partially_filled = None
         self.partially_filled_amount = 0
+        self._completed_amount = 0
         # short_info.market.set_leverage(short_info.trading_pair, self._perp_leverage)
         # long_info.market.set_leverage(long_info.trading_pair, self._perp_leverage)
 
@@ -111,7 +112,7 @@ class ParaStrategy(StrategyPyBase):
 
     @strategy_state.setter
     def strategy_state(self, value):
-        self.logger().info(f"{self._strategy_state} -> {value}")
+        self.logger().info(f"{self._completed_amount}/{self._total_amount} {self._strategy_state} -> {value}")
         self._strategy_state = value
 
     @property
@@ -160,7 +161,6 @@ class ParaStrategy(StrategyPyBase):
 
                     unmatched_positions = []
                     for market_info, positions, side in derivatives:
-                        self.logger().info(market_info.market.name)
                         if market_info.market.name == 'huobi_perpetual':
                             # market_info.market.set_trading_pair_position_mode(
                             #     market_info.trading_pair,
@@ -211,6 +211,7 @@ class ParaStrategy(StrategyPyBase):
                                 self.logger().info(
                                     f"Continue until {self._total_amount} is reached")
                                 self._ready_to_start = True
+                                self._completed_amount = amount
 
                             else:
                                 self.logger().info(
@@ -356,8 +357,10 @@ class ParaStrategy(StrategyPyBase):
             total_amount = market_info.market.quantize_order_amount(
                 market_info.trading_pair, self._total_amount)
 
-            if abs(self.positions(market_info)[0].amount) == total_amount:
+            self._completed_amount = abs(self.positions(market_info)[0].amount)
+            if self._completed_amount == total_amount:
                 self.logger().info(f"Reached total amount {self._total_amount}. Done")
+
                 self.strategy_state = StrategyState.REACHED_TOTAL_AMOUNT
             else:
                 self.strategy_state = StrategyState.POSITIONS_MATCH
@@ -367,6 +370,7 @@ class ParaStrategy(StrategyPyBase):
                 self.logger().warning(f"Positions don't match\nSHORT: {self.short_positions}\nLONG:{self.long_positions}")
                 return
             self._completed_closing_order_ids.clear()
+            self._completed_amount += self.executing_proposal.order_amount
             if self._short_is_derivative:
                 market_info = self._short_info
             elif self._long_is_derivative:
@@ -416,7 +420,7 @@ class ParaStrategy(StrategyPyBase):
             ProposalSide(self._short_info, short_is_buy, short_price, self._short_order_type, self._short_is_derivative),
             ProposalSide(self._long_info, long_is_buy, long_price, self._long_order_type, self._long_is_derivative),
             chunk_size)
-        # self.logger().info(f"Make proposal {proposal} because short price is {short_price}, long price is {long_price}")
+        self.logger().debug(f"Make proposal {proposal} because short price is {short_price}, long price is {long_price}")
         return proposal
 
     def apply_slippage_buffer(self, order_price, is_buy, market_info):
@@ -428,7 +432,7 @@ class ParaStrategy(StrategyPyBase):
         order_price = market_info.market.quantize_order_price(market_info.trading_pair, order_price)
 
         buy_or_sell = 'BUY' if is_buy else 'SELL'
-        self.logger().info(f"{market_info.market.display_name.capitalize()}:Applied slippage {self._limit_slip} to {buy_or_sell} price {old_price}: {order_price}")
+        self.logger().debug(f"{market_info.market.display_name.capitalize()}:Applied slippage {self._limit_slip} to {buy_or_sell} price {old_price}: {order_price}")
         return order_price
 
     def apply_slippage_buffers(self, proposal: Proposal):
@@ -491,7 +495,7 @@ class ParaStrategy(StrategyPyBase):
 
             if adjusted_candidate_order.amount < order_amount:
                 self.logger().info(
-                    f"Cannot arbitrage, {proposal_side.market_info.market.display_name} balance"
+                    f"Cannot trade, {proposal_side.market_info.market.display_name} balance"
                     f" is insufficient to place the order candidate {order_candidate}."
                 )
                 return False
@@ -528,7 +532,7 @@ class ParaStrategy(StrategyPyBase):
 
             if adjusted_candidate_order.amount < order_amount:
                 self.logger().info(
-                    f"Cannot arbitrage, {proposal_side.market_info.market.display_name} balance"
+                    f"Cannot trade, {proposal_side.market_info.market.display_name} balance"
                     f" is insufficient to place the order candidate {order_candidate}."
                 )
                 return False
@@ -744,11 +748,11 @@ class ParaStrategy(StrategyPyBase):
             self.logger().warn(f"Unexpected state {self.strategy_state} when order got canceled. Ignore if this is cleaning of standing orders at start/end")
 
     def did_create_buy_order(self, event: BuyOrderCreatedEvent):
-        self.logger().info(f"Created {event.type} BUY order {event.order_id}")
+        self.logger().debug(f"Created {event.type} BUY order {event.order_id}")
         self.wait_to_fill = event.order_id
 
     def did_create_sell_order(self, event: SellOrderCreatedEvent):
-        self.logger().info(f"Created {event.type} SELL order {event.order_id}")
+        self.logger().debug(f"Created {event.type} SELL order {event.order_id}")
         self.wait_to_fill = event.order_id
 
     def update_complete_order_id_lists(self, order_id: str):
