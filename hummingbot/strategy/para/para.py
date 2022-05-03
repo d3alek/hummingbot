@@ -715,7 +715,7 @@ class ParaStrategy(StrategyPyBase):
             self.logger().warn(f"Unexpected order {order_id} got filled while waiting on {self.wait_to_fill}. Ignore")
             return
         self.update_complete_order_id_lists(order_id)
-        if self.strategy_state in [StrategyState.OPENING_LIMIT, StrategyState.CLOSING_LIMIT]:
+        if self.strategy_state in [StrategyState.OPENING_LIMIT, StrategyState.CLOSING_LIMIT, StrategyState.WAIT_TO_CANCEL_LIMIT]:
             # Execute second part of proposal
             self.execute_proposal(self.executing_proposal)
         elif self.strategy_state in [StrategyState.OPENING_MARKET, StrategyState.CLOSING_MARKET]:
