@@ -554,7 +554,7 @@ class ParaStrategy(StrategyPyBase):
             else:
                 next_state = StrategyState.CLOSING_LIMIT
 
-        elif self.strategy_state in [StrategyState.OPENING_LIMIT, StrategyState.CLOSING_LIMIT]:
+        elif self.strategy_state in [StrategyState.OPENING_LIMIT, StrategyState.CLOSING_LIMIT, StrategyState.WAIT_TO_CANCEL_LIMIT]:
             execute_side = proposal.market_side
             position_action = self._position_action if execute_side.is_derivative else None
             if self._position_action == PositionAction.OPEN:
