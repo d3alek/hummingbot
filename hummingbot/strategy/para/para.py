@@ -230,12 +230,6 @@ class ParaStrategy(StrategyPyBase):
             self._main_task = safe_ensure_future(self.main(timestamp))
 
     async def main(self, timestamp):
-        """
-        The main procedure for the arbitrage strategy.
-        """
-
-        # if self._strategy_state == StrategyState.ERROR:
-        #     return
         if self.strategy_state in (StrategyState.OPENING_MARKET, StrategyState.CLOSING_MARKET):
             self.check_market_order_complete()
             return
@@ -554,7 +548,7 @@ class ParaStrategy(StrategyPyBase):
             else:
                 next_state = StrategyState.CLOSING_LIMIT
 
-        elif self.strategy_state in [StrategyState.OPENING_LIMIT, StrategyState.CLOSING_LIMIT, StrategyState.WAIT_TO_CANCEL_LIMIT]:
+        elif self.strategy_state in [StrategyState.OPENING_LIMIT, StrategyState.CLOSING_LIMIT]:
             execute_side = proposal.market_side
             position_action = self._position_action if execute_side.is_derivative else None
             if self._position_action == PositionAction.OPEN:
@@ -734,6 +728,13 @@ class ParaStrategy(StrategyPyBase):
             # If any of the cancelled order got filled, process it as if the partially filled amount was a complete order
             # That is, hedge it in Market side.
             self.executing_proposal.order_amount = self.partially_filled_amount
+
+            # TODO once we have proper state management, it would be cleaner to just go back to previous state
+            if self._position_action == PositionAction.OPEN:
+                self.strategy_state = StrategyState.OPENING_LIMIT
+            else:
+                self.strategy_state = StrategyState.CLOSING_LIMIT
+
             self.process_completed_order(order_id)
         else:
             self.strategy_state = StrategyState.POSITIONS_MATCH
@@ -760,3 +761,5 @@ class ParaStrategy(StrategyPyBase):
             self._completed_opening_order_ids.add(order_id)
         elif self.strategy_state in [StrategyState.CLOSING_LIMIT, StrategyState.CLOSING_MARKET]:
             self._completed_closing_order_ids.add(order_id)
+        else:
+            self.logger().error(f"Update completed order id lists called during unexpected state {self.strategy_state}")
