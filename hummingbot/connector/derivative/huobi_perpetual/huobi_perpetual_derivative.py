@@ -731,6 +731,8 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
                 OrderCancelledEvent(self.current_timestamp,
                                     tracked_order.client_order_id))
             self.stop_tracking_order(tracked_order.client_order_id)
+        elif order_status == OrderStatus.Submitted:
+            self.logger().debug(f"Submitted order {tracked_order}")
         else:
             self.logger().info(f"Do not know how to process order update {order_status}")
 
