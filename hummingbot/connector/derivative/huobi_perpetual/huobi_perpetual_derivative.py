@@ -497,9 +497,9 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
 
                 # Calculate the newly executed amount for this update.
                 tracked_order.last_state = str(order_status.value)
-                new_confirmed_amount = Decimal(order_update["trade_volume"])
+                contract_size = self._contract_sizes[trading_pair]
+                new_confirmed_amount = Decimal(order_update["trade_volume"]) * contract_size
                 execute_amount_diff = new_confirmed_amount - tracked_order.executed_amount_base
-
                 if execute_amount_diff > s_decimal_0:
                     tracked_order.executed_amount_base = new_confirmed_amount
                     tracked_order.executed_amount_quote = Decimal(order_update["trade_turnover"])
@@ -668,7 +668,8 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
         if order_status == OrderStatus.ParialFilled:
             for trade in order_update['trade']:
                 execute_price = Decimal(trade["trade_price"])
-                execute_amount_diff = Decimal(trade["trade_volume"])
+                contract_size = self._contract_sizes[tracked_order.trading_pair]
+                execute_amount_diff = Decimal(trade["trade_volume"]) * contract_size
 
                 tracked_order = self._in_flight_orders.get(client_order_id, None)
 
@@ -695,7 +696,7 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
                                 ),
                                 exchange_trade_id=str(trade["id"])
                             ))
-        if order_status == OrderStatus.Filled:
+        elif order_status == OrderStatus.Filled:
             tracked_order.last_state = str(order_status.value)
 
             event = (self.MARKET_BUY_ORDER_COMPLETED_EVENT_TAG
@@ -721,7 +722,7 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
                                ))
             self.stop_tracking_order(tracked_order.client_order_id)
 
-        if order_status == OrderStatus.Canceled:
+        elif order_status == OrderStatus.Canceled or order_status == OrderStatus.PartialFilledCanceled:
             tracked_order.last_state = str(order_status.value)
             self.logger().info(f"The order {tracked_order.client_order_id} has been cancelled "
                                f"according to order delta websocket API.")
@@ -730,6 +731,8 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
                 OrderCancelledEvent(self.current_timestamp,
                                     tracked_order.client_order_id))
             self.stop_tracking_order(tracked_order.client_order_id)
+        else:
+            self.logger().info(f"Do not know how to process order update {order_status}")
 
     @property
     def status_dict(self) -> Dict[str, bool]:
