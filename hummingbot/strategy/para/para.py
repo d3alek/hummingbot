@@ -267,14 +267,21 @@ class ParaStrategy(StrategyPyBase):
         return limit_orders
 
     def check_limit_cancelled(self):
-        limit_orders = self.get_limit_orders()
-        if len(limit_orders) == 0:
-            self.logger().info(f"No limit order found, assume {self.wait_to_cancel} was cancelled")
+        limit_side = self.executing_proposal.limit_side
+        limit_order = list(filter(
+            lambda l: l.client_order_id == self.wait_to_cancel,
+            limit_side.market_info.market.limit_orders
+        ))
+        if not limit_order:
+            raise RuntimeError(f"Order {self.wait_to_cancel} not found while waiting for it to cancel")
+        limit_order = limit_order[0]
+        if limit_order.status == LimitOrderStatus.CANCELED:
+            self.logger().info(f"{self.wait_to_cancel} cancelled successfully.3")
             self.process_cancel(self.wait_to_cancel)
             self.wait_to_cancel = None
         else:
             if self._last_reported_ts + 5 < self.current_timestamp:
-                self.logger().info(f"Limit orders: {len(limit_orders)}. Waiting to cancel.")
+                self.logger().info(f"Wait to cancel order {self.wait_to_cancel} with status {limit_order.status}.")
                 self._last_reported_ts = self.current_timestamp
 
     async def keep_limit_order_up_to_date(self):
