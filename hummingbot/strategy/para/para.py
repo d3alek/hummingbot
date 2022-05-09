@@ -36,6 +36,7 @@ from hummingbot.strategy.strategy_py_base import StrategyPyBase
 NaN = float("nan")
 s_decimal_zero = Decimal(0)
 spa_logger = None
+WAIT_TO_CANCEL_SECONDS = 5
 
 
 class StrategyState(Enum):
@@ -103,6 +104,7 @@ class ParaStrategy(StrategyPyBase):
         self.partially_filled = None
         self.partially_filled_amount = 0
         self._completed_amount = 0
+        self.previous_strategy_state = None
         # short_info.market.set_leverage(short_info.trading_pair, self._perp_leverage)
         # long_info.market.set_leverage(long_info.trading_pair, self._perp_leverage)
 
@@ -113,6 +115,8 @@ class ParaStrategy(StrategyPyBase):
     @strategy_state.setter
     def strategy_state(self, value):
         self.logger().info(f"{self._completed_amount}/{self._total_amount} {self._strategy_state} -> {value}")
+        self.previous_strategy_state = self._strategy_state
+        self.strategy_state_entered = self.current_timestamp
         self._strategy_state = value
 
     @property
@@ -267,6 +271,14 @@ class ParaStrategy(StrategyPyBase):
         return limit_orders
 
     def check_limit_cancelled(self):
+        if self.strategy_state_entered + WAIT_TO_CANCEL_SECONDS < self.current_timestamp:
+            self.logger().warning(f"Waited {WAIT_TO_CANCEL_SECONDS} seconds for cancel, request cancel again")
+            limit_side = self.executing_proposal.limit_side
+            self.cancel_order(
+                market_trading_pair_tuple=limit_side.market_info,
+                order_id=self.wait_to_cancel)
+            return
+
         limit_side = self.executing_proposal.limit_side
         limit_order = list(filter(
             lambda l: l.client_order_id == self.wait_to_cancel,
@@ -275,8 +287,10 @@ class ParaStrategy(StrategyPyBase):
         if not limit_order:
             raise RuntimeError(f"Order {self.wait_to_cancel} not found while waiting for it to cancel")
         limit_order = limit_order[0]
+
+        # TODO not sure this ever happens
         if limit_order.status == LimitOrderStatus.CANCELED:
-            self.logger().info(f"{self.wait_to_cancel} cancelled successfully.3")
+            self.logger().info(f"{self.wait_to_cancel} cancelled successfully.")
             self.process_cancel(self.wait_to_cancel)
             self.wait_to_cancel = None
         else:
@@ -712,6 +726,10 @@ class ParaStrategy(StrategyPyBase):
         self.logger().info(f"Partially filled order {self.partially_filled} for total {self.partially_filled_amount}/{self._chunk_size}")
 
     def process_completed_order(self, order_id):
+        if self.strategy_state == StrategyState.WAIT_TO_CANCEL_LIMIT:
+            self.logger().warn(f"We asked the order {self.wait_to_cancel} to be canceled but it got filled. Hedge it.")
+            self.strategy_state = self.previous_strategy_state
+
         if self.wait_to_fill != order_id:
             self.logger().warn(f"Unexpected order {order_id} got filled while waiting on {self.wait_to_fill}. Ignore")
             return
@@ -736,11 +754,8 @@ class ParaStrategy(StrategyPyBase):
             # That is, hedge it in Market side.
             self.executing_proposal.order_amount = self.partially_filled_amount
 
-            # TODO once we have proper state management, it would be cleaner to just go back to previous state
-            if self._position_action == PositionAction.OPEN:
-                self.strategy_state = StrategyState.OPENING_LIMIT
-            else:
-                self.strategy_state = StrategyState.CLOSING_LIMIT
+            if self.strategy_state == StrategyState.WAIT_TO_CANCEL_LIMIT:
+                self.strategy_state = self.previous_strategy_state
 
             self.process_completed_order(order_id)
         else:
