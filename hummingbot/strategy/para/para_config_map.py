@@ -58,7 +58,7 @@ para_config_map = {
     "strategy": ConfigVar(
         key="strategy",
         prompt="",
-        default="funding_rate"),
+        default="para"),
     "short": ConfigVar(
         key="short",
         prompt="Where to SHORT (Exchange/AMM) >>> ",
