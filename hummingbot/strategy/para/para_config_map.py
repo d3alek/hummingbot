@@ -73,7 +73,7 @@ para_config_map = {
         on_validated=exchange_on_validated),
     "short_order_type": ConfigVar(
         key="short_order_type",
-        prompt="Either LIMIT or MARKET >>> ",
+        prompt="Short order type: either LIMIT or MARKET >>> ",
         prompt_on_new=True,
         validator=lambda v: validate_order_type(v)),
     "trading_pair": ConfigVar(
@@ -94,7 +94,7 @@ para_config_map = {
         prompt_on_new=True),
     "action_open": ConfigVar(
         key="action_open",
-        prompt="If True, OPEN positions, if False, CLOSE",
+        prompt="If True, OPEN positions, if False, CLOSE >>> ",
         validator=lambda v: validate_bool(v),
         type_str="bool",
         prompt_on_new=True),
