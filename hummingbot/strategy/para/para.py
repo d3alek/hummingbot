@@ -203,8 +203,9 @@ class ParaStrategy(StrategyPyBase):
                                     self._ready_to_start = True
                             else:
                                 unmatched_positions.append(position)
-
-                    if len(unmatched_positions) == 0:
+                    if len(derivatives) < 2:
+                        pass
+                    elif len(unmatched_positions) == 0:
                         pass
                     elif len(unmatched_positions) == 2:
                         if abs(unmatched_positions[0].amount) == abs(unmatched_positions[1].amount):
