@@ -37,6 +37,7 @@ NaN = float("nan")
 s_decimal_zero = Decimal(0)
 spa_logger = None
 WAIT_TO_CANCEL_SECONDS = 5
+LIMIT_ORDER_MISSING_SECONDS = 5
 
 
 class StrategyState(Enum):
@@ -306,6 +307,9 @@ class ParaStrategy(StrategyPyBase):
 
         if len(limit_orders) == 0:
             self.logger().info("No limit order found to keep up to date")
+            if self.strategy_state_entered + LIMIT_ORDER_MISSING_SECONDS < self.current_timestamp:
+                self.logger().info(f"No limit order for {LIMIT_ORDER_MISSING_SECONDS}, assume placing limit order failed")
+                self.strategy_state = StrategyState.POSITIONS_MATCH
             return
 
         elif len(limit_orders) > 1:
