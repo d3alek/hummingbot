@@ -422,19 +422,15 @@ class ParaStrategy(StrategyPyBase):
                 trading_pair, False, long_amount)
         ]
         prices = await safe_gather(*tasks)
-        short_buy, short_sell, long_buy, long_sell = [*prices]
+        short_ask, short_bid, long_ask, long_bid = [*prices]
 
         short_is_buy = self._position_action == PositionAction.CLOSE
         long_is_buy = not short_is_buy
-        short_price, long_price = (short_buy, long_sell) if short_is_buy else (short_sell, long_buy)
+        short_price, long_price = (short_ask, long_bid) if short_is_buy else (short_bid, long_ask)
         if self._short_order_type == OrderType.LIMIT_MAKER:
-            # We can choose to replace short price to be closer to long price (taker price)
-            fn = min if short_is_buy else max
-            short_price = fn(short_price, long_price)
+            short_price = long_price
         else:
-            # We can choose to replace long price to be closer to short price (taker price)
-            fn = min if long_is_buy else max
-            long_price = fn(short_price, long_price)
+            long_price = short_price
 
         proposal = Proposal(
             ProposalSide(self._short_info, short_is_buy, short_price, self._short_order_type, self._short_is_derivative),
