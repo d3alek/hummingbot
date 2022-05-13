@@ -452,7 +452,7 @@ class ParaStrategy(StrategyPyBase):
         order_price = market_info.market.quantize_order_price(market_info.trading_pair, order_price)
 
         buy_or_sell = 'BUY' if is_buy else 'SELL'
-        self.logger().debug(f"{market_info.market.display_name.capitalize()}:Applied slippage {self._limit_slip} to {buy_or_sell} price {old_price}: {order_price}")
+        self.logger().info(f"{market_info.market.display_name.capitalize()}:Applied slippage {self._limit_slip} to {buy_or_sell} price {old_price}: {order_price}")
         return order_price
 
     def apply_slippage_buffers(self, proposal: Proposal):

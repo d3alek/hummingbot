@@ -442,17 +442,9 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
         return (await self._api_request("post", path_url=path_url, data=params, is_auth_required=True))[0]
 
     def parse_status(self, status):
-        if status == 3:
-            return OrderStatus.Submitted
-        elif status == 4:
-            return OrderStatus.ParialFilled
-        elif status == 5:
-            return OrderStatus.PartialFilledCanceled
-        elif status == 6:
-            return OrderStatus.Filled
-        elif status == 7:
-            return OrderStatus.Canceled
-        else:
+        try:
+            return OrderStatus(status)
+        except Exception:
             # see https://huobiapi.github.io/docs/usdt_swap/v1/en/#cross-get-information-of-order
             raise RuntimeError(f"Unknown order status {status}")
 
@@ -1020,6 +1012,8 @@ class HuobiPerpetualDerivative(ExchangeBase, PerpetualTrading):
 
     def quantize_order_amount(self, trading_pair: str, amount, price=s_decimal_0):
         trading_rule = self._trading_rules[trading_pair]
+
+        # TODO check why did not this convert 28.9 LUNA to 29 or 28
         quantized_amount = ExchangeBase.quantize_order_amount(self, trading_pair, amount)
         # Huobi Futures place_order API wants volume in contracts, but volume here is the symbol amount,
         # so convert from symbol amount to contracts here

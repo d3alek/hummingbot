@@ -92,3 +92,4 @@ class OrderStatus(Enum):
     PartialFilledCanceled = 5
     Filled = 6
     Canceled = 7
+    Cancelling = 11
