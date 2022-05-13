@@ -276,6 +276,8 @@ class ParaStrategy(StrategyPyBase):
         if self.strategy_state_entered + WAIT_TO_CANCEL_SECONDS < self.current_timestamp:
             self.logger().warning(f"Waited {WAIT_TO_CANCEL_SECONDS} seconds for cancel, request cancel again")
             limit_side = self.executing_proposal.limit_side
+            self.strategy_state = self.previous_strategy_state
+            self.strategy_state = StrategyState.WAIT_TO_CANCEL_LIMIT
             self.cancel_order(
                 market_trading_pair_tuple=limit_side.market_info,
                 order_id=self.wait_to_cancel)
